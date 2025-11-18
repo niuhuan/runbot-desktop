@@ -1,0 +1,3 @@
+[submodule "third/QFace"]
+	path = third/QFace
+	url = https://github.com/koishijs/QFace.git

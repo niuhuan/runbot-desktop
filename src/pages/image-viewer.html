@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>图片查看器</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: rgba(0, 0, 0, 0.9);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: default;
+    }
+
+    body.dragging {
+      cursor: grabbing;
+    }
+    
+    body.can-drag {
+      cursor: grab;
+    }
+
+    #image-container {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    #image {
+      max-width: 100%;
+      max-height: 100%;
+      width: auto;
+      height: auto;
+      object-fit: contain;
+      user-select: none;
+      -webkit-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
+      transition: transform 0.1s ease-out;
+      -webkit-user-drag: none !important;
+      -khtml-user-drag: none !important;
+      -moz-user-drag: none !important;
+      -o-user-drag: none !important;
+      pointer-events: auto;
+      display: block;
+      visibility: visible;
+      opacity: 1;
+      -webkit-touch-callout: none;
+    }
+
+    .controls {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      display: flex;
+      gap: 10px;
+      z-index: 1000;
+    }
+
+    .control-button {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      color: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      transition: all 0.2s;
+      backdrop-filter: blur(10px);
+    }
+
+    .control-button:hover {
+      background: rgba(255, 255, 255, 0.3);
+      transform: scale(1.1);
+    }
+
+    .zoom-info {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.6);
+      color: white;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 14px;
+      backdrop-filter: blur(10px);
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    .zoom-info.show {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="image-container">
+    <img id="image" src="" alt="图片">
+    <div class="controls">
+      <button class="control-button" id="zoom-in" title="放大">+</button>
+      <button class="control-button" id="zoom-out" title="缩小">−</button>
+      <button class="control-button" id="reset" title="重置">↺</button>
+      <button class="control-button" id="close" title="关闭">×</button>
+    </div>
+    <div class="zoom-info" id="zoom-info"></div>
+  </div>
+
+  <script type="module">
+    import { getCurrentWindow, currentMonitor, LogicalSize } from '@tauri-apps/api/window';
+
+    const image = document.getElementById('image');
+    const imageContainer = document.getElementById('image-container');
+    
+    // 彻底阻止图片的默认拖拽行为（macOS 上特别需要）
+    image.setAttribute('draggable', 'false');
+    image.setAttribute('ondragstart', 'return false;');
+    image.setAttribute('ondrag', 'return false;');
+    image.setAttribute('ondragend', 'return false;');
+    
+    // 阻止所有拖拽相关事件
+    image.addEventListener('dragstart', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      return false;
+    }, { passive: false, capture: true });
+    
+    image.addEventListener('drag', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      return false;
+    }, { passive: false, capture: true });
+    
+    image.addEventListener('dragend', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      return false;
+    }, { passive: false, capture: true });
+    
+    // 阻止拖拽进入和离开事件
+    image.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+    }, { passive: false, capture: true });
+    
+    image.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+    }, { passive: false, capture: true });
+    
+    image.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+    }, { passive: false, capture: true });
+    
+    image.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+    }, { passive: false, capture: true });
+    const zoomInBtn = document.getElementById('zoom-in');
+    const zoomOutBtn = document.getElementById('zoom-out');
+    const resetBtn = document.getElementById('reset');
+    const closeBtn = document.getElementById('close');
+    const zoomInfo = document.getElementById('zoom-info');
+    const body = document.body;
+
+    // 从 URL 参数获取图片 URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const imageUrl = urlParams.get('url');
+    
+    if (imageUrl) {
+      image.src = imageUrl;
+    } else {
+      console.error('未提供图片 URL');
+      getCurrentWindow().close();
+    }
+
+    // 图片变换状态
+    let scale = 1;
+    let translateX = 0;
+    let translateY = 0;
+    let isDragging = false;
+    let startX = 0;
+    let startY = 0;
+    let currentTranslateX = 0;
+    let currentTranslateY = 0;
+    let lastClickTime = 0;
+    let clickCount = 0;
+
+    // 更新图片变换
+    function updateTransform() {
+      image.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+      zoomInfo.textContent = `${Math.round(scale * 100)}%`;
+      zoomInfo.classList.add('show');
+      setTimeout(() => {
+        zoomInfo.classList.remove('show');
+      }, 2000);
+      
+      // 更新光标样式：始终显示 grab 光标（表示可以拖动）
+      body.classList.add('can-drag');
+    }
+
+    // 放大
+    zoomInBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // 重置双击检测
+      clickCount = 0;
+      lastClickTime = 0;
+      scale = Math.min(scale * 1.2, 5);
+      updateTransform();
+    });
+
+    // 缩小
+    zoomOutBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // 重置双击检测
+      clickCount = 0;
+      lastClickTime = 0;
+      scale = Math.max(scale / 1.2, 0.1);
+      updateTransform();
+    });
+
+    // 重置
+    resetBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // 重置双击检测
+      clickCount = 0;
+      lastClickTime = 0;
+      scale = 1;
+      translateX = 0;
+      translateY = 0;
+      currentTranslateX = 0;
+      currentTranslateY = 0;
+      updateTransform();
+    });
+
+    // 关闭窗口
+    closeBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const window = getCurrentWindow();
+      await window.close();
+    });
+
+    // 鼠标滚轮缩放
+    imageContainer.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? 0.9 : 1.1;
+      const oldScale = scale;
+      scale = Math.max(0.1, Math.min(5, scale * delta));
+      
+      // 以鼠标位置为中心缩放
+      const rect = imageContainer.getBoundingClientRect();
+      const x = e.clientX - rect.left - rect.width / 2;
+      const y = e.clientY - rect.top - rect.height / 2;
+      
+      translateX = x - (x - translateX) * (scale / oldScale);
+      translateY = y - (y - translateY) * (scale / oldScale);
+      
+      updateTransform();
+    });
+
+    // 鼠标拖拽（用于移动图片）
+    imageContainer.addEventListener('mousedown', (e) => {
+      // 如果点击的是控制按钮，不处理
+      if (e.target.closest('.controls')) {
+        return;
+      }
+      
+      // 允许拖动图片（无论是否缩放）
+      if (e.target === image) {
+        e.preventDefault();
+        e.stopPropagation();
+        // 阻止默认的拖拽行为
+        isDragging = true;
+        body.classList.add('dragging');
+        startX = e.clientX - currentTranslateX;
+        startY = e.clientY - currentTranslateY;
+      }
+    }, { passive: false });
+
+    imageContainer.addEventListener('mousemove', (e) => {
+      if (isDragging) {
+        e.preventDefault();
+        e.stopPropagation();
+        currentTranslateX = e.clientX - startX;
+        currentTranslateY = e.clientY - startY;
+        translateX = currentTranslateX;
+        translateY = currentTranslateY;
+        updateTransform();
+      }
+    }, { passive: false });
+
+    imageContainer.addEventListener('mouseup', (e) => {
+      if (isDragging) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      isDragging = false;
+      body.classList.remove('dragging');
+    }, { passive: false });
+
+    imageContainer.addEventListener('mouseleave', (e) => {
+      if (isDragging) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      isDragging = false;
+      body.classList.remove('dragging');
+    }, { passive: false });
+    
+    // 在容器级别也阻止拖拽事件
+    imageContainer.addEventListener('dragstart', (e) => {
+      if (e.target === image || image.contains(e.target)) {
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
+      }
+    }, { passive: false });
+    
+    imageContainer.addEventListener('drag', (e) => {
+      if (e.target === image || image.contains(e.target)) {
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
+      }
+    }, { passive: false });
+
+    // 双击重置（使用点击计数来避免与按钮点击冲突）
+    imageContainer.addEventListener('click', (e) => {
+      // 如果点击的是控制按钮，不处理
+      if (e.target.closest('.controls')) {
+        return;
+      }
+      
+      const now = Date.now();
+      const timeSinceLastClick = now - lastClickTime;
+      
+      if (timeSinceLastClick < 300 && timeSinceLastClick > 0) {
+        // 在 300ms 内的第二次点击，认为是双击
+        clickCount++;
+        if (clickCount === 2) {
+          // 双击重置
+          scale = 1;
+          translateX = 0;
+          translateY = 0;
+          currentTranslateX = 0;
+          currentTranslateY = 0;
+          updateTransform();
+          clickCount = 0;
+          lastClickTime = 0;
+        }
+      } else {
+        // 新的点击序列
+        clickCount = 1;
+        lastClickTime = now;
+        // 延迟重置，如果 300ms 内没有第二次点击，则重置计数
+        setTimeout(() => {
+          if (Date.now() - lastClickTime >= 300) {
+            clickCount = 0;
+            lastClickTime = 0;
+          }
+        }, 300);
+      }
+    });
+
+    // 图片加载完成后，根据图片大小调整窗口
+    image.addEventListener('load', async () => {
+      try {
+        const window = getCurrentWindow();
+        const monitor = await currentMonitor();
+        
+        if (monitor) {
+          const maxWidth = Math.min(monitor.size.width * 0.9, image.naturalWidth + 100);
+          const maxHeight = Math.min(monitor.size.height * 0.9, image.naturalHeight + 100);
+          
+          // 计算合适的窗口大小
+          const aspectRatio = image.naturalWidth / image.naturalHeight;
+          let width = maxWidth;
+          let height = maxWidth / aspectRatio;
+          
+          if (height > maxHeight) {
+            height = maxHeight;
+            width = maxHeight * aspectRatio;
+          }
+          
+          // 确保窗口不会太小
+          width = Math.max(width, 400);
+          height = Math.max(height, 300);
+          
+          await window.setSize(new LogicalSize(width, height));
+          await window.center();
+        }
+      } catch (error) {
+        console.error('调整窗口大小失败:', error);
+      }
+    });
+
+    // ESC 键关闭
+    document.addEventListener('keydown', async (e) => {
+      if (e.key === 'Escape') {
+        const window = getCurrentWindow();
+        await window.close();
+      }
+    });
+  </script>
+</body>
+</html>
+

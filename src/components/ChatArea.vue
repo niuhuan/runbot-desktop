@@ -1,0 +1,1863 @@
+<script setup lang="ts">
+import { ref, computed, watch, onMounted, nextTick, onUnmounted } from 'vue';
+import { runbotService, type OneBotMessage } from '../services/runbot';
+import { getMessages, saveMessage } from '../services/storage';
+import { parseCQCode, type CQSegment } from '../utils/cqcode';
+import { getFaceDisplayText, getFaceImageUrl } from '../utils/qq-face';
+import qface from 'qface';
+import { checkImageCache, downloadImage } from '../services/image';
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { getCurrentWindow, currentMonitor } from '@tauri-apps/api/window';
+import { listen } from '@tauri-apps/api/event';
+
+// 生成 UUID v4
+function generateUUID(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
+const props = defineProps<{
+  chatType: 'private' | 'group' | null;
+  chatId: number | null; // userId 或 groupId
+  chatName: string;
+  selfId?: number;
+}>();
+
+const messages = ref<OneBotMessage[]>([]);
+const inputText = ref('');
+const sending = ref(false);
+const messagesContainer = ref<HTMLElement | null>(null);
+const fileInputRef = ref<HTMLInputElement | null>(null);
+const selectedImages = ref<Array<{ file: File; preview: string }>>([]);
+const chatAvatarFailed = ref(false);
+const isComposing = ref(false); // 输入法组合状态
+const compositionEndTime = ref(0); // 输入法结束时间
+const showFacePicker = ref(false); // 是否显示表情选择器
+const facePickerRef = ref<HTMLElement | null>(null); // 表情选择器引用
+const showDebugPanel = ref(false); // 是否显示调试面板
+const isDev = import.meta.env.DEV; // 是否为开发环境
+
+// 过滤当前聊天的消息（包括发送的消息）
+const filteredMessages = computed(() => {
+  if (!props.chatId || !props.chatType) return [];
+  
+  return messages.value.filter(msg => {
+    // 处理接收的消息和发送的消息
+    if (msg.post_type === 'message' || msg.post_type === 'message_sent') {
+      if (props.chatType === 'private') {
+        // 私聊：必须 message_type 是 'private' 且 user_id 匹配
+        return msg.message_type === 'private' && msg.user_id === props.chatId;
+      } else if (props.chatType === 'group') {
+        // 群组：必须 message_type 是 'group' 且 group_id 匹配
+        return msg.message_type === 'group' && msg.group_id === props.chatId;
+      }
+    }
+    return false;
+  }).sort((a, b) => a.time - b.time);
+});
+
+// 时间段阈值（5分钟，单位：秒）
+const TIME_GROUP_THRESHOLD = 5 * 60;
+
+// 获取发送人ID（用于分组）
+const getSenderId = (msg: OneBotMessage): string => {
+  if (msg.post_type === 'message_sent') {
+    return 'self';
+  }
+  return `user_${msg.user_id || 'unknown'}`;
+};
+
+// 判断两个时间戳是否在同一个时间段内
+const isSameTimeGroup = (time1: number, time2: number): boolean => {
+  return Math.abs(time1 - time2) <= TIME_GROUP_THRESHOLD;
+};
+
+// 分组后的消息列表
+interface GroupedMessage {
+  time: number;
+  senderId: string;
+  senderName: string;
+  userId: number | null; // 发送人的 user_id（用于显示头像）
+  messages: OneBotMessage[];
+  showSender: boolean; // 是否显示发送人名称
+  showTime: boolean; // 是否显示时间
+}
+
+const groupedMessages = computed(() => {
+  const filtered = filteredMessages.value;
+  if (filtered.length === 0) return [];
+  
+  const groups: GroupedMessage[] = [];
+  let currentTimeGroup: number | null = null;
+  let currentSenderGroup: { senderId: string; senderName: string; userId: number | null; messages: OneBotMessage[] } | null = null;
+  
+  for (let i = 0; i < filtered.length; i++) {
+    const msg = filtered[i];
+    const senderId = getSenderId(msg);
+    const senderName = getSenderName(msg);
+    const userId = msg.post_type === 'message_sent' ? null : (msg.user_id || null);
+    const msgTime = msg.time;
+    
+    // 判断是否需要开始新的时间段
+    const needNewTimeGroup = currentTimeGroup === null || !isSameTimeGroup(msgTime, currentTimeGroup);
+    
+    // 判断是否需要开始新的发送人组
+    const needNewSenderGroup = 
+      needNewTimeGroup || // 新时间段
+      currentSenderGroup === null || // 第一个消息
+      currentSenderGroup.senderId !== senderId || // 不同发送人
+      currentSenderGroup.messages.length >= 10; // 已达到10条消息上限
+    
+    if (needNewTimeGroup) {
+      // 保存之前的发送人组
+      if (currentSenderGroup) {
+        groups.push({
+          time: currentTimeGroup!,
+          senderId: currentSenderGroup.senderId,
+          senderName: currentSenderGroup.senderName,
+          userId: currentSenderGroup.userId,
+          messages: currentSenderGroup.messages,
+          showSender: true,
+          showTime: true,
+        });
+      }
+      
+      // 开始新的时间段
+      currentTimeGroup = msgTime;
+      currentSenderGroup = {
+        senderId,
+        senderName,
+        userId,
+        messages: [msg],
+      };
+    } else if (needNewSenderGroup) {
+      // 保存之前的发送人组
+      if (currentSenderGroup) {
+        groups.push({
+          time: currentTimeGroup!,
+          senderId: currentSenderGroup.senderId,
+          senderName: currentSenderGroup.senderName,
+          userId: currentSenderGroup.userId,
+          messages: currentSenderGroup.messages,
+          showSender: true,
+          showTime: false, // 同一时间段内不重复显示时间
+        });
+      }
+      
+      // 开始新的发送人组
+      currentSenderGroup = {
+        senderId,
+        senderName,
+        userId,
+        messages: [msg],
+      };
+    } else {
+      // 添加到当前发送人组
+      if (currentSenderGroup) {
+        currentSenderGroup.messages.push(msg);
+      }
+    }
+  }
+  
+  // 保存最后一个发送人组
+  if (currentSenderGroup) {
+    const lastGroup = groups[groups.length - 1];
+    groups.push({
+      time: currentTimeGroup!,
+      senderId: currentSenderGroup.senderId,
+      senderName: currentSenderGroup.senderName,
+      userId: currentSenderGroup.userId,
+      messages: currentSenderGroup.messages,
+      showSender: true,
+      showTime: lastGroup ? !isSameTimeGroup(currentTimeGroup!, lastGroup.time) : true,
+    });
+  }
+  
+  return groups;
+});
+
+// 加载聊天消息（包括发送的消息）
+const loadChatMessages = async () => {
+  if (!props.chatId || !props.chatType || !props.selfId) return;
+
+  try {
+    // 加载接收的消息
+    const options: any = {
+      limit: 200, // 增加限制以包含发送的消息
+      selfId: props.selfId,
+    };
+
+    if (props.chatType === 'private') {
+      options.userId = props.chatId;
+      // 不限制 postType，这样也能加载 message_sent
+    } else if (props.chatType === 'group') {
+      options.groupId = props.chatId;
+      // 不限制 postType，这样也能加载 message_sent
+    }
+
+    const chatMessages = await getMessages(options);
+    // 过滤出当前聊天的消息（包括发送的消息）
+    messages.value = chatMessages.filter(msg => {
+      if (msg.post_type === 'message' || msg.post_type === 'message_sent') {
+        if (props.chatType === 'private') {
+          // 私聊：必须 message_type 是 'private' 且 user_id 匹配
+          return msg.message_type === 'private' && msg.user_id === props.chatId;
+        } else if (props.chatType === 'group') {
+          // 群组：必须 message_type 是 'group' 且 group_id 匹配
+          return msg.message_type === 'group' && msg.group_id === props.chatId;
+        }
+      }
+      return false;
+    });
+    
+    // 加载消息后滚动到底部
+    scrollToBottom();
+    
+    // 观察新消息中的图片
+    nextTick(() => {
+      observeImagePlaceholders();
+    });
+  } catch (error) {
+    console.error('加载聊天消息失败:', error);
+  }
+};
+
+// 将文件转换为 base64（返回完整的 data URI，用于预览和发送）
+const fileToBase64 = (file: File): Promise<{ base64: string; mimeType: string }> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      // 提取 MIME 类型和 base64 数据
+      const match = result.match(/^data:([^;]+);base64,(.+)$/);
+      if (match) {
+        resolve({
+          mimeType: match[1],
+          base64: match[2],
+        });
+      } else {
+        // 如果没有匹配到，尝试直接提取 base64
+        const base64 = result.split(',')[1] || result;
+        resolve({
+          mimeType: file.type || 'image/png',
+          base64,
+        });
+      }
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+};
+
+// 处理图片选择
+const handleImageSelect = async (event: Event) => {
+  const target = event.target as HTMLInputElement;
+  const files = target.files;
+  if (!files || files.length === 0) return;
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    // 检查是否是图片文件
+    if (!file.type.startsWith('image/')) {
+      alert(`文件 ${file.name} 不是图片文件`);
+      continue;
+    }
+
+    // 检查文件大小（限制为 10MB）
+    if (file.size > 10 * 1024 * 1024) {
+      alert(`图片 ${file.name} 太大，请选择小于 10MB 的图片`);
+      continue;
+    }
+
+    // 创建预览
+    const preview = URL.createObjectURL(file);
+    selectedImages.value.push({ file, preview });
+  }
+
+  // 清空 input，以便可以重复选择同一文件
+  if (fileInputRef.value) {
+    fileInputRef.value.value = '';
+  }
+};
+
+// 移除选中的图片
+const removeSelectedImage = (index: number) => {
+  const image = selectedImages.value[index];
+  URL.revokeObjectURL(image.preview);
+  selectedImages.value.splice(index, 1);
+};
+
+// 获取所有表情列表（只获取有图片的表情，即动态表情）
+const faceList = computed(() => {
+  return qface.data.filter(face => {
+    // 只显示动态表情（gif），不显示静态表情
+    return face.isStatic !== '1';
+  }).map(face => ({
+    id: face.QSid,
+    name: face.QDes.substring(1), // 去掉前面的斜杠
+    url: getFaceImageUrl(face.QSid),
+  }));
+});
+
+// 切换表情选择器显示状态
+const toggleFacePicker = () => {
+  showFacePicker.value = !showFacePicker.value;
+};
+
+// 选择表情
+const selectFace = (faceId: string) => {
+  // 将表情添加到输入框
+  // 格式：[CQ:face,id=123]
+  const faceCode = `[CQ:face,id=${faceId}]`;
+  inputText.value += faceCode;
+  // 关闭表情选择器
+  showFacePicker.value = false;
+};
+
+// 点击外部关闭表情选择器
+const handleClickOutside = (event: MouseEvent) => {
+  if (facePickerRef.value && !facePickerRef.value.contains(event.target as Node)) {
+    const target = event.target as HTMLElement;
+    // 如果点击的不是表情按钮，关闭选择器
+    if (!target.closest('.face-button')) {
+      showFacePicker.value = false;
+    }
+  }
+};
+
+// 打开图片查看器窗口
+const openImageViewer = async (imageUrl: string) => {
+  console.log('点击图片，准备打开查看器:', imageUrl);
+  
+  try {
+    // 检查窗口是否已存在
+    const windowId = 'image-viewer';
+    const existingWindow = await WebviewWindow.getByLabel(windowId);
+    
+    if (existingWindow) {
+      // 如果窗口已存在，关闭它
+      try {
+        await existingWindow.close();
+      } catch (e) {
+        // 忽略关闭错误
+        console.warn('关闭已存在的窗口失败:', e);
+      }
+    }
+    
+    // 获取当前窗口的位置和大小
+    const currentWindow = getCurrentWindow();
+    const position = await currentWindow.innerPosition();
+    const size = await currentWindow.innerSize();
+    
+    // 获取屏幕尺寸，创建比当前窗口更大的窗口
+    const monitor = await currentMonitor();
+    const screenWidth = monitor?.size.width || 1920;
+    const screenHeight = monitor?.size.height || 1080;
+    
+    // 创建新窗口，比当前窗口大一些，但不超过屏幕的 90%
+    const newWidth = Math.min(Math.max(size.width * 1.5, 800), screenWidth * 0.9);
+    const newHeight = Math.min(Math.max(size.height * 1.5, 600), screenHeight * 0.9);
+    
+    // 构建 URL（开发环境使用 localhost，生产环境使用相对路径）
+    const isDev = import.meta.env.DEV;
+    const baseUrl = isDev ? 'http://localhost:1420' : '';
+    const viewerUrl = `${baseUrl}/src/pages/image-viewer.html?url=${encodeURIComponent(imageUrl)}`;
+    
+    console.log('创建图片查看器窗口:', { viewerUrl, newWidth, newHeight });
+    
+    const imageViewerWindow = new WebviewWindow(windowId, {
+      url: viewerUrl,
+      title: '图片查看器',
+      width: newWidth,
+      height: newHeight,
+      x: position.x + (size.width - newWidth) / 2,
+      y: position.y + (size.height - newHeight) / 2,
+      resizable: true,
+      minimizable: true,
+      maximizable: true,
+      closable: true,
+      decorations: true,
+      alwaysOnTop: false,
+      skipTaskbar: false,
+      focus: true,
+      transparent: false,
+      center: false,
+    });
+    
+    console.log('图片查看器窗口已创建');
+    
+    // 监听窗口关闭事件
+    imageViewerWindow.once('tauri://close-requested', () => {
+      console.log('图片查看器窗口已关闭');
+    });
+  } catch (error) {
+    console.error('打开图片查看器失败:', error);
+    // 如果创建窗口失败，使用浏览器方式打开
+    try {
+      window.open(imageUrl, '_blank');
+    } catch (e) {
+      console.error('浏览器打开也失败:', e);
+    }
+  }
+};
+
+// 处理回车键（检查输入法状态）
+const handleEnterKey = (event: KeyboardEvent) => {
+  // 如果输入法正在组合输入，不发送消息
+  // 在 Mac 上，需要同时检查事件对象的 isComposing 属性和状态变量
+  // keyCode 229 表示 IME 正在处理输入
+  // 如果 compositionend 刚刚触发（100ms 内），也不发送（Mac 上 compositionend 可能在 keydown 之前触发）
+  const now = Date.now();
+  if (event.isComposing || isComposing.value || event.keyCode === 229 || (now - compositionEndTime.value < 100)) {
+    return;
+  }
+  sendMessage();
+};
+
+// 处理粘贴事件（从剪贴板粘贴图片）
+const handlePaste = async (event: ClipboardEvent) => {
+  // 如果正在发送，忽略粘贴
+  if (sending.value) {
+    return;
+  }
+
+  const clipboardData = event.clipboardData;
+  if (!clipboardData) {
+    return;
+  }
+
+  // 检查剪贴板中是否有图片
+  const items = Array.from(clipboardData.items);
+  const imageItem = items.find(item => item.type.startsWith('image/'));
+
+  if (imageItem) {
+    // 阻止默认粘贴行为（避免粘贴图片的 base64 文本到输入框）
+    event.preventDefault();
+
+    try {
+      const file = imageItem.getAsFile();
+      if (!file) {
+        return;
+      }
+
+      // 检查文件大小（限制为 10MB）
+      if (file.size > 10 * 1024 * 1024) {
+        alert('图片太大，请选择小于 10MB 的图片');
+        return;
+      }
+
+      // 创建预览
+      const preview = URL.createObjectURL(file);
+      selectedImages.value.push({ file, preview });
+    } catch (error) {
+      console.error('粘贴图片失败:', error);
+      alert('粘贴图片失败，请重试');
+    }
+  }
+};
+
+// 发送消息
+const sendMessage = async () => {
+  // 检查是否有内容（文本、图片或表情）
+  const hasText = inputText.value.trim().length > 0;
+  const hasImages = selectedImages.value.length > 0;
+  
+  if ((!hasText && !hasImages) || !props.chatId || !props.chatType || sending.value || !props.selfId) {
+    return;
+  }
+
+  // 构建消息数组（根据 NapCat API 文档格式）
+  const messageArray: Array<{ type: string; data: Record<string, any> }> = [];
+  
+  // 解析输入框中的内容，将 CQ 码转换为数组元素
+  if (hasText) {
+    const textContent = inputText.value.trim();
+    const segments = parseCQCode(textContent);
+    
+    // 将解析后的段转换为消息数组
+    for (const segment of segments) {
+      if (segment.type === 'text') {
+        // 文本段
+        if (segment.text && segment.text.trim()) {
+          messageArray.push({
+            type: 'text',
+            data: {
+              text: segment.text,
+            },
+          });
+        }
+      } else if (segment.type === 'face') {
+        // 表情段
+        const faceId = segment.data.id;
+        if (faceId) {
+          messageArray.push({
+            type: 'face',
+            data: {
+              id: faceId,
+            },
+          });
+        }
+      } else if (segment.type === 'image') {
+        // 图片段（从输入框中的 CQ 码解析出来的，这种情况较少见）
+        const file = segment.data.file;
+        if (file) {
+          messageArray.push({
+            type: 'image',
+            data: {
+              file: file,
+            },
+          });
+        }
+      }
+      // 其他类型的 CQ 码可以在这里处理
+    }
+  }
+  
+  // 检查消息是否包含图片
+  let hasImage = false;
+  
+  // 添加选中的图片（base64 编码）
+  for (const image of selectedImages.value) {
+    hasImage = true;
+    try {
+      const { base64 } = await fileToBase64(image.file);
+      // 根据 NapCat API 文档，使用数组格式
+      messageArray.push({
+        type: 'image',
+        data: {
+          file: `base64://${base64}`,
+          summary: '[图片]',
+        },
+      });
+    } catch (error) {
+      console.error('转换图片为 base64 失败:', error);
+      alert(`转换图片 ${image.file.name} 失败`);
+      return;
+    }
+  }
+  
+  // 检查消息数组中是否已有图片（从 CQ 码解析出来的）
+  if (!hasImage) {
+    hasImage = messageArray.some(item => item.type === 'image');
+  }
+  
+  // 为了显示，也构建一个 CQ 码格式的字符串（用于本地显示）
+  const messageText = messageArray.map(item => {
+    if (item.type === 'text') {
+      return item.data.text;
+    } else if (item.type === 'image') {
+      return `[CQ:image,file=${item.data.file}]`;
+    } else if (item.type === 'face') {
+      return `[CQ:face,id=${item.data.id}]`;
+    }
+    return '';
+  }).join('');
+  const now = Math.floor(Date.now() / 1000);
+  
+  // 生成本地消息 ID
+  const localMessageId = generateUUID();
+  
+  // 创建本地消息记录（立即显示）
+  const localMessage: OneBotMessage = {
+    localMessageId,
+    time: now,
+    self_id: props.selfId,
+    post_type: 'message_sent',
+    message_type: props.chatType,
+    sub_type: undefined,
+    message_id: undefined,
+    // 对于私聊，user_id 应该是接收者的 ID（chatId）
+    // 对于群聊，user_id 应该是自己的 ID（selfId），group_id 是群组 ID
+    user_id: props.chatType === 'private' ? props.chatId : props.selfId,
+    group_id: props.chatType === 'group' ? props.chatId : undefined,
+    message: messageText,
+    raw_message: messageText,
+    sender: undefined,
+    raw: undefined,
+    sendStatus: 'sending', // 初始状态为发送中
+  };
+  
+  // 立即添加到消息列表（乐观更新）
+  messages.value.push(localMessage);
+  
+  // 保存到数据库
+  try {
+    await saveMessage(localMessage, props.selfId);
+  } catch (error) {
+    console.error('保存消息失败:', error);
+  }
+  
+  // 如果滚动条距离底部小于150px，自动滚动到底部（等待 DOM 更新）
+  nextTick(() => {
+    if (shouldAutoScroll()) {
+      scrollToBottom();
+    }
+  });
+  
+  // 清空输入框和选中的图片
+  inputText.value = '';
+  // 清理预览 URL
+  selectedImages.value.forEach(img => URL.revokeObjectURL(img.preview));
+  selectedImages.value = [];
+  
+  sending.value = true;
+  try {
+    if (props.chatType === 'private') {
+      await runbotService.sendPrivateMessage(props.chatId, messageArray, localMessageId, true, hasImage);
+    } else if (props.chatType === 'group') {
+      await runbotService.sendGroupMessage(props.chatId, messageArray, localMessageId, true, hasImage);
+    }
+  } catch (error) {
+    console.error('发送消息失败:', error);
+    alert(`发送消息失败: ${error}`);
+    // 发送失败，更新消息状态为失败
+    const index = messages.value.findIndex(msg => 
+      msg.localMessageId === localMessage.localMessageId
+    );
+    if (index !== -1) {
+      messages.value[index].sendStatus = 'failed';
+    }
+  } finally {
+    sending.value = false;
+  }
+};
+
+// 格式化时间
+const formatTime = (timestamp: number): string => {
+  const date = new Date(timestamp * 1000);
+  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+};
+
+// 解析消息内容为 CQ 段
+const parseMessage = (msg: OneBotMessage): CQSegment[] => {
+  const content = msg.message || msg.raw_message || '';
+  return parseCQCode(content);
+};
+
+// 检查消息是否只包含图片/表情（没有文本）
+// 判断是否为单个图片（没有文本，只有一个图片）
+const isSingleImage = (segments: CQSegment[]): boolean => {
+  if (segments.length !== 1) return false;
+  const segment = segments[0];
+  return segment.type === 'image' && (!segment.text || !segment.text.trim());
+};
+
+
+// 判断是否为只有图片/表情的消息（可能有多个，但没有文本）
+const isImageOnlyMessage = (segments: CQSegment[]): boolean => {
+  if (segments.length === 0) return false;
+  
+  // 检查是否只有图片或表情，没有文本
+  const hasText = segments.some(s => s.type === 'text' && s.text && s.text.trim());
+  const hasImageOrFace = segments.some(s => s.type === 'image' || s.type === 'face');
+  
+  return !hasText && hasImageOrFace;
+};
+
+// 图片缓存映射（URL -> 本地路径）
+const imageCache = ref<Map<string, string>>(new Map());
+
+// 图片加载状态（URL -> 是否正在加载）
+const imageLoading = ref<Map<string, boolean>>(new Map());
+
+// 图片加载失败标记（URL -> 是否加载失败）
+const imageFailed = ref<Map<string, boolean>>(new Map());
+
+// 加载图片到缓存
+const loadImage = async (url: string, file?: string) => {
+  if (!props.selfId || !url) return;
+  
+  // 如果已经在缓存中或正在加载，跳过
+  if (imageCache.value.has(url) || imageLoading.value.get(url)) {
+    return;
+  }
+  
+  // 如果已经加载失败，跳过
+  if (imageFailed.value.get(url)) {
+    return;
+  }
+  
+  imageLoading.value.set(url, true);
+  
+  try {
+    // 先检查缓存
+    let cachedPath = await checkImageCache(url, props.selfId);
+    
+    // 如果没有缓存，下载（传递 file 参数用于 URL 过期时重新获取）
+    if (!cachedPath) {
+      cachedPath = await downloadImage(url, props.selfId, file);
+    }
+    
+    if (cachedPath) {
+      imageCache.value.set(url, cachedPath);
+      imageFailed.value.set(url, false);
+    } else {
+      imageFailed.value.set(url, true);
+    }
+  } catch (error) {
+    console.error('加载图片失败:', error);
+    imageFailed.value.set(url, true);
+  } finally {
+    imageLoading.value.set(url, false);
+  }
+};
+
+// Intersection Observer 用于图片懒加载
+let imageObserver: IntersectionObserver | null = null;
+
+// 初始化图片懒加载观察器
+const initImageObserver = () => {
+  if (typeof IntersectionObserver === 'undefined') {
+    return; // 浏览器不支持 IntersectionObserver
+  }
+  
+  imageObserver = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            const element = entry.target as HTMLElement;
+            const url = element.dataset.imageUrl;
+            const file = element.dataset.imageFile;
+            if (url && !imageCache.value.has(url) && !imageLoading.value.get(url)) {
+              loadImage(url, file);
+              // 加载后停止观察
+              imageObserver?.unobserve(element);
+            }
+          }
+        }
+      },
+    {
+      root: messagesContainer.value,
+      rootMargin: '200px', // 提前 200px 开始加载
+      threshold: 0.01,
+    }
+  );
+};
+
+// 观察图片占位符元素（在 DOM 更新后）
+const observeImagePlaceholders = () => {
+  if (!imageObserver || !messagesContainer.value) return;
+  
+  nextTick(() => {
+    const placeholders = messagesContainer.value?.querySelectorAll('[data-image-url]');
+    placeholders?.forEach((placeholder) => {
+      const url = (placeholder as HTMLElement).dataset.imageUrl;
+      if (url && !imageCache.value.has(url) && !imageLoading.value.get(url) && !imageFailed.value.get(url)) {
+        imageObserver?.observe(placeholder);
+      }
+    });
+  });
+};
+
+// 监听消息变化，观察新的图片占位符
+watch(() => filteredMessages.value, () => {
+  observeImagePlaceholders();
+}, { deep: true });
+
+// 渲染消息内容（支持 CQ 码）
+const renderMessage = (segments: CQSegment[]): any[] => {
+  return segments.map((segment, index) => {
+    if (segment.type === 'text' && segment.text) {
+      return {
+        type: 'text',
+        content: segment.text,
+        key: `text-${index}`,
+      };
+    } else if (segment.type === 'image') {
+      // 支持 base64:// 格式的图片
+      const file = segment.data.file || '';
+      const url = segment.data.url || '';
+      const subType = segment.data.sub_type || '0';
+      const summary = segment.data.summary || '';
+      
+      // 解码 HTML 实体
+      const decodedSummary = summary
+        .replace(/&#91;/g, '[')
+        .replace(/&#93;/g, ']')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'");
+      
+      // 如果是 base64:// 格式，直接使用 file 参数
+      if (file.startsWith('base64://')) {
+        // base64 图片，直接显示（不需要下载）
+        const base64Data = file.substring(9); // 移除 "base64://" 前缀
+        // 尝试检测图片类型（通过 base64 数据的前几个字节）
+        // 默认使用 image/png，但可以根据需要检测
+        let mimeType = 'image/png';
+        // 简单的 MIME 类型检测（可选，如果 OneBot 服务器提供了类型信息会更好）
+        return {
+          type: 'image',
+          url: `data:${mimeType};base64,${base64Data}`, // 使用 data URI
+          key: `image-${index}-base64-${base64Data.substring(0, 20)}`,
+          subType,
+          summary: decodedSummary,
+        };
+      }
+      
+      // 普通 URL 图片
+      const imageUrl = url || file;
+      return {
+        type: 'image',
+        url: imageUrl,
+        file: file, // 保存 file 参数，用于 URL 过期时重新获取
+        key: `image-${index}-${imageUrl}`,
+        subType,
+        summary: decodedSummary,
+      };
+    } else if (segment.type === 'face') {
+      return {
+        type: 'face',
+        id: segment.data.id || '',
+        key: `face-${index}`,
+      };
+    } else if (segment.type === 'at') {
+      return {
+        type: 'at',
+        qq: segment.data.qq || '',
+        key: `at-${index}`,
+      };
+    } else {
+      // 未知类型，显示原始文本
+      return {
+        type: 'text',
+        content: `[CQ:${segment.type}]`,
+        key: `unknown-${index}`,
+      };
+    }
+  });
+};
+
+// 获取发送者名称
+const getSenderName = (msg: OneBotMessage): string => {
+  // 如果是自己发送的消息，显示"我"
+  if (msg.post_type === 'message_sent') {
+    return '我';
+  }
+  
+  if (msg.sender) {
+    return msg.sender.nickname || msg.sender.card || `用户 ${msg.user_id}`;
+  }
+  return `用户 ${msg.user_id || '未知'}`;
+};
+
+// 检查是否应该自动滚动（距离底部小于250px）
+const shouldAutoScroll = (): boolean => {
+  if (!messagesContainer.value) return false;
+  const container = messagesContainer.value;
+  const scrollTop = container.scrollTop;
+  const scrollHeight = container.scrollHeight;
+  const clientHeight = container.clientHeight;
+  const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+  return distanceFromBottom <= 250;
+};
+
+// 滚动到底部
+const scrollToBottom = () => {
+  nextTick(() => {
+    // 使用 setTimeout 确保 DOM 完全更新
+    setTimeout(() => {
+      if (messagesContainer.value) {
+        messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
+      }
+    }, 50);
+  });
+};
+
+// 监听聊天变化
+watch(() => [props.chatId, props.chatType], () => {
+  // 重置头像加载失败状态
+  chatAvatarFailed.value = false;
+  
+  if (props.chatId && props.chatType) {
+    loadChatMessages();
+  } else {
+    messages.value = [];
+  }
+}, { immediate: true });
+
+// 监听新消息（从父组件传入）
+const addMessage = (msg: OneBotMessage) => {
+  // 检查是否属于当前聊天（包括发送的消息）
+  // 对于发送的消息（message_sent），需要特殊处理：
+  // - 私聊：message_type 是 'private' 且 user_id 是接收者 ID（chatId）
+  // - 群聊：message_type 是 'group' 且 group_id 是群组 ID（chatId）
+  // 对于接收的消息（message），正常判断
+  const isCurrentChat = msg.post_type === 'message_sent' 
+    ? ((props.chatType === 'private' && msg.message_type === 'private' && msg.user_id === props.chatId) ||
+       (props.chatType === 'group' && msg.message_type === 'group' && msg.group_id === props.chatId))
+    : ((props.chatType === 'private' && msg.message_type === 'private' && msg.user_id === props.chatId) ||
+       (props.chatType === 'group' && msg.message_type === 'group' && msg.group_id === props.chatId));
+  
+  if (isCurrentChat && (msg.post_type === 'message' || msg.post_type === 'message_sent')) {
+    // 如果消息没有 localMessageId，生成一个
+    if (!msg.localMessageId) {
+      msg.localMessageId = generateUUID();
+    }
+    
+    // 检查是否已存在（使用 localMessageId 检查）
+    const exists = messages.value.some(existing => 
+      existing.localMessageId === msg.localMessageId && 
+      existing.localMessageId !== undefined
+    );
+    
+    if (!exists) {
+      messages.value.push(msg);
+      // 注意：不在这里保存到数据库，因为 MainView.vue 已经保存了
+      // 这里只负责显示
+      
+      // 如果滚动条距离底部小于150px，自动滚动到底部（等待 DOM 更新）
+      nextTick(() => {
+        if (shouldAutoScroll()) {
+          scrollToBottom();
+        }
+        // 观察新消息中的图片
+        observeImagePlaceholders();
+      });
+    }
+  }
+};
+
+// 初始化图片观察器
+onMounted(async () => {
+  nextTick(() => {
+    initImageObserver();
+    observeImagePlaceholders();
+  });
+  
+  // 监听点击外部关闭表情选择器
+  document.addEventListener('click', handleClickOutside);
+  
+  // 监听消息发送成功事件
+  try {
+    const unlistenSent = await listen<{ local_message_id: string; message_id: number }>('message-sent', (event) => {
+      const { local_message_id, message_id } = event.payload;
+      
+      // 更新对应消息的状态和 message_id
+      const messageIndex = messages.value.findIndex(msg => msg.localMessageId === local_message_id);
+      if (messageIndex !== -1) {
+        messages.value[messageIndex].sendStatus = 'sent';
+        messages.value[messageIndex].message_id = message_id;
+      }
+    });
+    
+    // 监听消息内容更新事件（用于更新图片消息的 base64 为正常 URL）
+    const unlistenUpdated = await listen<{ local_message_id: string; message_id: number; message: string; raw_message: string }>('message-updated', (event) => {
+      const { local_message_id, message, raw_message } = event.payload;
+      
+      // 更新对应消息的内容
+      const messageIndex = messages.value.findIndex(msg => msg.localMessageId === local_message_id);
+      if (messageIndex !== -1) {
+        messages.value[messageIndex].message = message;
+        messages.value[messageIndex].raw_message = raw_message;
+      }
+    });
+    
+    // 在组件卸载时取消监听
+    onUnmounted(() => {
+      unlistenSent();
+      unlistenUpdated();
+    });
+  } catch (error) {
+    console.error('监听消息事件失败:', error);
+  }
+});
+
+// 清理图片观察器
+onUnmounted(() => {
+  if (imageObserver) {
+    imageObserver.disconnect();
+    imageObserver = null;
+  }
+  
+  // 移除点击外部监听
+  document.removeEventListener('click', handleClickOutside);
+});
+
+// 暴露方法供父组件调用
+defineExpose({
+  addMessage,
+  loadChatMessages,
+});
+</script>
+
+<template>
+  <div class="chat-area">
+    <!-- 聊天头部 -->
+    <div class="chat-header">
+      <div class="chat-title">
+        <div class="chat-avatar">
+          <img 
+            v-if="chatId && chatType && !chatAvatarFailed" 
+            :src="chatType === 'private' ? `asset://avatar/user/${chatId}.png` : `asset://avatar/group/${chatId}.png`" 
+            :alt="chatName"
+            class="avatar-image"
+            @error="chatAvatarFailed = true"
+          />
+          <div v-else class="avatar-placeholder">
+            {{ chatName ? chatName.charAt(0) : '?' }}
+          </div>
+        </div>
+        <span class="chat-name">{{ chatName || '选择聊天' }}</span>
+      </div>
+      <!-- Debug 按钮（仅开发环境显示） -->
+      <button 
+        v-if="isDev" 
+        class="debug-button" 
+        @click="showDebugPanel = !showDebugPanel"
+        :title="showDebugPanel ? '隐藏调试面板' : '显示调试面板'"
+      >
+        🐛 Debug
+      </button>
+    </div>
+    
+    <!-- Debug 面板（仅开发环境显示） -->
+    <div v-if="isDev && showDebugPanel" class="debug-panel">
+      <div class="debug-panel-header">
+        <h3>消息调试面板</h3>
+        <button class="debug-close-button" @click="showDebugPanel = false">×</button>
+      </div>
+      <div class="debug-panel-content">
+        <div class="debug-info">
+          <p><strong>总消息数：</strong>{{ messages.length }}</p>
+          <p><strong>当前聊天消息数：</strong>{{ filteredMessages.length }}</p>
+        </div>
+        <div class="debug-messages">
+          <h4>所有消息实体：</h4>
+          <div class="debug-message-list">
+            <div 
+              v-for="(msg, index) in messages" 
+              :key="msg.localMessageId || index"
+              class="debug-message-item"
+            >
+              <div class="debug-message-header">
+                <span class="debug-message-index">#{{ index + 1 }}</span>
+                <span class="debug-message-type">{{ msg.post_type }}</span>
+                <span v-if="msg.message_id" class="debug-message-id">ID: {{ msg.message_id }}</span>
+                <span v-if="msg.localMessageId" class="debug-local-id">Local: {{ msg.localMessageId.substring(0, 8) }}...</span>
+              </div>
+              <pre class="debug-message-json">{{ JSON.stringify(msg, null, 2) }}</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 消息列表 -->
+    <div class="messages-container" ref="messagesContainer">
+      <div v-if="groupedMessages.length === 0" class="empty-state">
+        <p>暂无消息</p>
+        <p class="hint">开始聊天吧！</p>
+      </div>
+      <template v-for="(group, groupIndex) in groupedMessages" :key="`group-${groupIndex}`">
+        <!-- 时间显示 -->
+        <div v-if="group.showTime" class="message-time">
+          {{ formatTime(group.time) }}
+        </div>
+        
+        <!-- 发送人组 -->
+        <div 
+          class="message-item"
+          :class="[group.messages[0].message_type, { 'message-sent': group.messages[0].post_type === 'message_sent' }]"
+        >
+          <div class="message-content">
+            <!-- 头像区域（群组且是他人消息时，在最后一条消息左侧显示） -->
+            <div v-if="chatType === 'group' && group.showSender && group.userId" class="message-avatar">
+              <img 
+                :src="`asset://avatar/user/${group.userId}.png`" 
+                :alt="group.senderName"
+                class="message-avatar-image"
+                @error="(e) => { (e.target as HTMLImageElement).style.display = 'none'; }"
+              />
+            </div>
+            
+            <!-- 消息气泡组 -->
+            <div class="message-bubbles">
+              <!-- 发送人名称（群组且显示发送人时，在第一条消息上方显示） -->
+              <div v-if="chatType === 'group' && group.showSender" class="message-sender">
+                {{ group.senderName }}
+              </div>
+              
+              <div
+                v-for="(msg, msgIndex) in group.messages"
+                :key="`${msg.time}-${msg.message_id || msgIndex}`"
+                class="message-text"
+                :class="{ 
+                  'single-image': isSingleImage(parseMessage(msg)),
+                  'image-only': isImageOnlyMessage(parseMessage(msg)) && !isSingleImage(parseMessage(msg)),
+                  'message-bubble': true
+                }"
+              >
+                <template v-for="item in renderMessage(parseMessage(msg))" :key="item.key">
+                  <span v-if="item.type === 'text'">{{ item.content }}</span>
+                  <template v-else-if="item.type === 'image'">
+                    <!-- base64 图片（data URI）直接显示 -->
+                    <img
+                      v-if="item.url.startsWith('data:')"
+                      :src="item.url"
+                      alt="图片"
+                      class="message-image"
+                      @click.stop="openImageViewer(item.url)"
+                      @error="() => { imageFailed.set(item.url, true); }"
+                    />
+                    <!-- URL 图片（需要下载和缓存） -->
+                    <template v-else>
+                      <img
+                        v-if="imageCache.get(item.url) && !imageFailed.get(item.url)"
+                        :data-image-url="item.url"
+                        :data-image-file="item.file || ''"
+                        :src="`asset://localhost/${imageCache.get(item.url)}`"
+                        alt="图片"
+                        class="message-image"
+                        @click.stop="openImageViewer(`asset://localhost/${imageCache.get(item.url)}`)"
+                        @error="() => { imageFailed.set(item.url, true); }"
+                      />
+                      <div v-else-if="!imageFailed.get(item.url)" :data-image-url="item.url" :data-image-file="item.file || ''" ref="imagePlaceholderRef" class="image-placeholder">
+                        <span class="image-loading">图片加载中...</span>
+                      </div>
+                      <div v-else class="image-error">
+                        <span>[图片加载失败]</span>
+                      </div>
+                    </template>
+                  </template>
+                  <template v-else-if="item.type === 'face'">
+                    <img 
+                      v-if="getFaceImageUrl(item.id)" 
+                      :src="getFaceImageUrl(item.id)!" 
+                      :alt="getFaceDisplayText(item.id)"
+                      class="cq-face-image"
+                      @error="(e: Event) => { 
+                        // 图片加载失败时，隐藏图片
+                        const img = e.target as HTMLImageElement;
+                        if (img) {
+                          img.style.display = 'none';
+                        }
+                      }"
+                    />
+                    <span v-else class="cq-face">{{ getFaceDisplayText(item.id) }}</span>
+                  </template>
+                  <span v-else-if="item.type === 'at'" class="cq-at">@{{ item.qq }}</span>
+                </template>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- 输入区域 -->
+    <div class="input-area" v-if="chatId && chatType">
+      <!-- 选中的图片预览 -->
+      <div v-if="selectedImages.length > 0" class="selected-images">
+        <div
+          v-for="(image, index) in selectedImages"
+          :key="index"
+          class="selected-image-item"
+        >
+          <img :src="image.preview" alt="预览" class="preview-image" />
+          <button
+            @click="removeSelectedImage(index)"
+            class="remove-image-button"
+            title="移除"
+          >
+            ×
+          </button>
+        </div>
+      </div>
+      
+      <div class="input-container">
+        <input
+          ref="fileInputRef"
+          type="file"
+          accept="image/*"
+          multiple
+          style="display: none"
+          @change="handleImageSelect"
+        />
+        <div class="button-group">
+          <!-- 表情按钮 -->
+          <button
+            @click.stop="toggleFacePicker"
+            class="face-button"
+            :disabled="sending"
+            title="选择表情"
+            :class="{ active: showFacePicker }"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
+              <line x1="9" y1="9" x2="9.01" y2="9"></line>
+              <line x1="15" y1="9" x2="15.01" y2="9"></line>
+            </svg>
+          </button>
+          
+          <!-- 图片按钮 -->
+          <button
+            @click="fileInputRef?.click()"
+            class="image-button"
+            :disabled="sending"
+            title="选择图片"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+              <circle cx="8.5" cy="8.5" r="1.5"></circle>
+              <polyline points="21 15 16 10 5 21"></polyline>
+            </svg>
+          </button>
+        </div>
+        
+        <!-- 表情选择器气泡 -->
+        <div v-if="showFacePicker" ref="facePickerRef" class="face-picker-popup">
+          <div class="face-picker-grid">
+            <div
+              v-for="face in faceList"
+              :key="face.id"
+              class="face-item"
+              :title="face.name"
+              @click="selectFace(face.id)"
+            >
+              <img
+                v-if="face.url"
+                :src="face.url"
+                :alt="face.name"
+                class="face-image"
+              />
+              <span v-else class="face-name">{{ face.name }}</span>
+            </div>
+          </div>
+        </div>
+        <textarea
+          v-model="inputText"
+          placeholder="输入消息... (Enter 发送, Shift+Enter 换行, Cmd/Ctrl+V 粘贴图片)"
+          rows="3"
+          @keydown.enter.exact.prevent="handleEnterKey"
+          @keydown.shift.enter.exact="inputText += '\n'"
+          @compositionstart="isComposing = true; compositionEndTime = 0"
+          @compositionupdate="isComposing = true"
+          @compositionend="isComposing = false; compositionEndTime = Date.now()"
+          @paste="handlePaste"
+          :disabled="sending"
+        ></textarea>
+      </div>
+    </div>
+    <div v-else class="input-placeholder">
+      选择一个聊天开始对话
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.chat-area {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #f5f5f5;
+}
+
+.chat-header {
+  padding: 12px 20px;
+  background: white;
+  border-bottom: 1px solid #e0e0e0;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.chat-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+}
+
+.debug-button {
+  padding: 6px 12px;
+  background: #ff9800;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+
+.debug-button:hover {
+  background: #f57c00;
+}
+
+.debug-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 500px;
+  height: 100vh;
+  background: white;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.debug-panel-header {
+  padding: 12px 16px;
+  background: #ff9800;
+  color: white;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.debug-panel-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.debug-close-button {
+  background: transparent;
+  border: none;
+  color: white;
+  font-size: 24px;
+  cursor: pointer;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.debug-close-button:hover {
+  opacity: 0.8;
+}
+
+.debug-panel-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.debug-info {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: #f5f5f5;
+  border-radius: 4px;
+}
+
+.debug-info p {
+  margin: 4px 0;
+  font-size: 14px;
+}
+
+.debug-messages h4 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+.debug-message-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.debug-message-item {
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #fafafa;
+}
+
+.debug-message-header {
+  padding: 8px 12px;
+  background: #e3f2fd;
+  border-bottom: 1px solid #e0e0e0;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.debug-message-index {
+  font-weight: 600;
+  color: #1976d2;
+}
+
+.debug-message-type {
+  padding: 2px 6px;
+  background: #2196f3;
+  color: white;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.debug-message-id {
+  color: #666;
+}
+
+.debug-local-id {
+  color: #999;
+  font-family: monospace;
+}
+
+.debug-message-json {
+  padding: 12px;
+  margin: 0;
+  font-size: 11px;
+  font-family: 'Courier New', monospace;
+  background: white;
+  overflow-x: auto;
+  max-height: 300px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.chat-avatar {
+  flex-shrink: 0;
+}
+
+.chat-avatar .avatar-image {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #f0f0f0;
+}
+
+.chat-avatar .avatar-placeholder {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.chat-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #333;
+}
+
+.messages-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #999;
+}
+
+.empty-state p {
+  margin: 4px 0;
+}
+
+.hint {
+  font-size: 12px;
+}
+
+.message-item {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 8px;
+}
+
+.message-time {
+  text-align: center;
+  font-size: 11px;
+  color: #999;
+  margin: 8px 0;
+}
+
+.message-content {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: 70%;
+}
+
+/* 群组消息：接收的消息靠左 */
+.message-item.group .message-content {
+  margin-left: 0;
+  margin-right: auto;
+}
+
+/* 私聊消息：接收的消息靠左 */
+.message-item.private:not(.message-sent) .message-content {
+  margin-left: 0;
+  margin-right: auto;
+}
+
+/* 发送的消息（包括私聊和群组）：靠右 */
+.message-item.message-sent .message-content {
+  margin-left: auto;
+  margin-right: 0;
+}
+
+/* 头像区域（在消息左侧） */
+.message-avatar {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.message-avatar-image {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #f0f0f0;
+}
+
+/* 消息气泡组容器 */
+.message-bubbles {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* 发送人名称（在第一条消息上方） */
+.message-sender {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 2px;
+  font-weight: 500;
+  padding: 0 2px;
+}
+
+.message-text {
+  background: white;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 1.5;
+  word-wrap: break-word;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+/* 发送的消息（无论私聊还是群组）：蓝色背景 */
+.message-item.message-sent .message-text {
+  background: #2196f3;
+  color: white;
+}
+
+/* 接收的消息（私聊和群组）：白色背景 */
+.message-item.private:not(.message-sent) .message-text,
+.message-item.group:not(.message-sent) .message-text {
+  background: white;
+  color: #333;
+}
+
+/* 单个图片：透明背景，圆角 */
+.message-text.single-image {
+  background: transparent !important;
+  padding: 0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.message-text.single-image img {
+  border-radius: 8px;
+  display: block;
+}
+
+/* 单个表情：没有气泡，不需要背景，不需要圆角 */
+.message-text.single-face {
+  background: transparent !important;
+  padding: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.message-text.single-face .cq-face-image {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* 多个图片或表情：排列到气泡里（使用默认的气泡样式） */
+
+.message-item.message-sent .message-content {
+  margin-left: auto;
+  margin-right: 0;
+}
+
+.message-image {
+  max-width: 300px;
+  max-height: 400px;
+  border-radius: 8px;
+  margin: 4px 0;
+  display: block;
+  cursor: pointer;
+  object-fit: contain;
+  transition: opacity 0.2s;
+}
+
+.message-image:hover {
+  opacity: 0.9;
+}
+
+.image-placeholder {
+  display: inline-block;
+  padding: 20px 40px;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 8px;
+  margin: 4px 0;
+  color: #999;
+  font-size: 12px;
+}
+
+.image-loading {
+  display: inline-block;
+}
+
+.image-error {
+  display: inline-block;
+  padding: 20px 40px;
+  background: rgba(244, 67, 54, 0.1);
+  border: 1px solid rgba(244, 67, 54, 0.3);
+  border-radius: 8px;
+  margin: 4px 0;
+  color: #f44336;
+  font-size: 12px;
+}
+
+.image-error span {
+  display: inline-block;
+}
+
+.cq-face,
+.cq-at {
+  color: #2196f3;
+  font-weight: 500;
+}
+
+.cq-face-image {
+  width: 24px;
+  height: 24px;
+  vertical-align: middle;
+  display: inline-block;
+  object-fit: contain;
+}
+
+.cq-at {
+  background: rgba(33, 150, 243, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.input-area {
+  padding: 16px;
+  background: white;
+  border-top: 1px solid #e0e0e0;
+}
+
+.selected-images {
+  display: flex;
+  gap: 8px;
+  padding: 8px 16px;
+  overflow-x: auto;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.selected-image-item {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.preview-image {
+  width: 80px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #ddd;
+}
+
+.remove-image-button {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #f44336;
+  color: white;
+  border: none;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.remove-image-button:hover {
+  background: #d32f2f;
+}
+
+.input-container {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  position: relative;
+}
+
+.button-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.face-button,
+.image-button {
+  padding: 10px 14px;
+  background-color: #f5f5f5;
+  color: #666;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.face-button svg,
+.image-button svg {
+  width: 20px;
+  height: 20px;
+}
+
+.face-button:hover:not(:disabled),
+.image-button:hover:not(:disabled) {
+  background-color: #e0e0e0;
+  color: #333;
+}
+
+.face-button.active {
+  background-color: #2196f3;
+  color: white;
+  border-color: #2196f3;
+}
+
+.face-button:disabled,
+.image-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 表情选择器气泡 */
+.face-picker-popup {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 8px;
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 16px;
+  width: 450px;
+  max-height: 500px;
+  overflow-y: auto;
+  overflow-x: auto;
+  z-index: 1000;
+}
+
+.face-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 8px;
+}
+
+.face-item {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background-color 0.2s;
+  overflow: hidden;
+}
+
+.face-item:hover {
+  background-color: #f0f0f0;
+}
+
+.face-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.face-name {
+  font-size: 10px;
+  text-align: center;
+  color: #666;
+  padding: 2px;
+}
+
+.input-container textarea {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  resize: none;
+  min-height: 60px;
+  max-height: 120px;
+}
+
+.input-container textarea:focus {
+  outline: none;
+  border-color: #2196f3;
+  box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.1);
+}
+
+
+.input-placeholder {
+  padding: 40px;
+  text-align: center;
+  color: #999;
+  font-size: 14px;
+  background: white;
+  border-top: 1px solid #e0e0e0;
+}
+</style>
+
