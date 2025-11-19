@@ -27,7 +27,6 @@ const props = defineProps<{
 }>();
 
 const messages = ref<OneBotMessage[]>([]);
-const inputText = ref('');
 const sending = ref(false);
 const messagesContainer = ref<HTMLElement | null>(null);
 const fileInputRef = ref<HTMLInputElement | null>(null);
@@ -37,6 +36,7 @@ const isComposing = ref(false); // 输入法组合状态
 const compositionEndTime = ref(0); // 输入法结束时间
 const showFacePicker = ref(false); // 是否显示表情选择器
 const facePickerRef = ref<HTMLElement | null>(null); // 表情选择器引用
+const inputEditorRef = ref<HTMLElement | null>(null); // 富文本编辑器引用
 const showDebugPanel = ref(false); // 是否显示调试面板
 const isDev = import.meta.env.DEV; // 是否为开发环境
 
@@ -307,14 +307,235 @@ const toggleFacePicker = () => {
   showFacePicker.value = !showFacePicker.value;
 };
 
-// 选择表情
+// 选择表情（插入到富文本编辑器）
 const selectFace = (faceId: string) => {
-  // 将表情添加到输入框
-  // 格式：[CQ:face,id=123]
-  const faceCode = `[CQ:face,id=${faceId}]`;
-  inputText.value += faceCode;
+  if (!inputEditorRef.value) return;
+  
+  const editor = inputEditorRef.value;
+  const selection = window.getSelection();
+  
+  if (selection && selection.rangeCount > 0) {
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    
+    // 创建表情图片元素
+    const faceImg = document.createElement('img');
+    const faceImageUrl = getFaceImageUrl(faceId);
+    if (faceImageUrl) {
+      faceImg.src = faceImageUrl;
+      faceImg.alt = getFaceDisplayText(faceId);
+      faceImg.className = 'input-face-emoji';
+      faceImg.setAttribute('data-face-id', faceId);
+      faceImg.setAttribute('contenteditable', 'false');
+      faceImg.style.verticalAlign = 'middle';
+      faceImg.style.display = 'inline-block';
+      faceImg.style.width = '20px';
+      faceImg.style.height = '20px';
+      
+      // 插入表情图片
+      range.insertNode(faceImg);
+      
+      // 在表情后插入一个零宽空格，方便光标定位
+      const space = document.createTextNode('\u200B');
+      range.setStartAfter(faceImg);
+      range.insertNode(space);
+      range.setStartAfter(space);
+      range.collapse(true);
+      
+      // 更新选择范围
+      selection.removeAllRanges();
+      selection.addRange(range);
+    } else {
+      // 如果没有图片，插入文本
+      const textNode = document.createTextNode(getFaceDisplayText(faceId));
+      range.insertNode(textNode);
+      range.setStartAfter(textNode);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    
+    // 聚焦编辑器
+    editor.focus();
+  } else {
+    // 如果没有选择，在末尾插入
+    const faceImg = document.createElement('img');
+    const faceImageUrl = getFaceImageUrl(faceId);
+    if (faceImageUrl) {
+      faceImg.src = faceImageUrl;
+      faceImg.alt = getFaceDisplayText(faceId);
+      faceImg.className = 'input-face-emoji';
+      faceImg.setAttribute('data-face-id', faceId);
+      faceImg.setAttribute('contenteditable', 'false');
+      faceImg.style.verticalAlign = 'middle';
+      faceImg.style.display = 'inline-block';
+      faceImg.style.width = '20px';
+      faceImg.style.height = '20px';
+      editor.appendChild(faceImg);
+      const space = document.createTextNode('\u200B');
+      editor.appendChild(space);
+      
+      // 移动光标到末尾
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      range.collapse(false);
+      const sel = window.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }
+  }
+  
   // 关闭表情选择器
   showFacePicker.value = false;
+};
+
+// 从富文本编辑器提取内容（将表情图片转换为 CQ 码）
+const extractContentFromEditor = (): string => {
+  if (!inputEditorRef.value) return '';
+  
+  const editor = inputEditorRef.value;
+  let result = '';
+  
+  // 遍历所有子节点
+  const walker = document.createTreeWalker(
+    editor,
+    NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
+    null
+  );
+  
+  let node;
+  while (node = walker.nextNode()) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      // 文本节点，直接添加（跳过零宽空格）
+      const text = node.textContent || '';
+      result += text.replace(/\u200B/g, '');
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      const element = node as HTMLElement;
+      // 如果是表情图片
+      if (element.tagName === 'IMG' && element.classList.contains('input-face-emoji')) {
+        const faceId = element.getAttribute('data-face-id');
+        if (faceId) {
+          result += `[CQ:face,id=${faceId}]`;
+        }
+      } else if (element.tagName === 'BR') {
+        // 换行符
+        result += '\n';
+      } else if (element.tagName === 'DIV' && element !== editor) {
+        // 嵌套的 div，递归处理
+        const divContent = extractContentFromDiv(element);
+        result += divContent;
+        if (divContent && !divContent.endsWith('\n')) {
+          result += '\n';
+        }
+      }
+    }
+  }
+  
+  return result.trim();
+};
+
+// 从 div 元素提取内容（辅助函数）
+const extractContentFromDiv = (div: HTMLElement): string => {
+  let result = '';
+  for (const child of Array.from(div.childNodes)) {
+    if (child.nodeType === Node.TEXT_NODE) {
+      result += (child.textContent || '').replace(/\u200B/g, '');
+    } else if (child.nodeType === Node.ELEMENT_NODE) {
+      const element = child as HTMLElement;
+      if (element.tagName === 'IMG' && element.classList.contains('input-face-emoji')) {
+        const faceId = element.getAttribute('data-face-id');
+        if (faceId) {
+          result += `[CQ:face,id=${faceId}]`;
+        }
+      } else if (element.tagName === 'BR') {
+        result += '\n';
+      } else if (element.tagName === 'DIV') {
+        const divContent = extractContentFromDiv(element);
+        result += divContent;
+        if (divContent && !divContent.endsWith('\n')) {
+          result += '\n';
+        }
+      } else {
+        result += element.textContent || '';
+      }
+    }
+  }
+  return result;
+};
+
+// 处理编辑器输入事件
+const handleEditorInput = () => {
+  // 可以在这里处理输入，比如限制某些内容
+};
+
+// 处理编辑器粘贴事件
+const handleEditorPaste = async (event: ClipboardEvent) => {
+  // 如果正在发送，忽略粘贴
+  if (sending.value) {
+    event.preventDefault();
+    return;
+  }
+  
+  // 检查是否有图片
+  const items = event.clipboardData?.items;
+  if (items) {
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.indexOf('image') !== -1) {
+        event.preventDefault();
+        const file = item.getAsFile();
+        if (file) {
+          // 处理图片文件
+          const preview = URL.createObjectURL(file);
+          selectedImages.value.push({ file, preview });
+        }
+        return;
+      }
+    }
+  }
+  
+  // 允许默认粘贴行为（文本）
+  // 但需要清理粘贴的内容，移除格式
+  event.preventDefault();
+  const text = event.clipboardData?.getData('text/plain') || '';
+  if (text) {
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0);
+      range.deleteContents();
+      const textNode = document.createTextNode(text);
+      range.insertNode(textNode);
+      range.setStartAfter(textNode);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+  }
+};
+
+// 处理编辑器键盘事件
+const handleEditorKeyDown = (event: KeyboardEvent) => {
+  // Enter 键发送消息
+  if (event.key === 'Enter' && !event.shiftKey) {
+    // 检查输入法状态
+    if (isComposing.value) {
+      return;
+    }
+    
+    // 检查输入法结束时间
+    const now = Date.now();
+    if (now - compositionEndTime.value < 100) {
+      return;
+    }
+    
+    event.preventDefault();
+    sendMessage();
+    return;
+  }
+  
+  // Shift+Enter 换行（允许默认行为）
 };
 
 // 点击外部关闭表情选择器
@@ -404,65 +625,12 @@ const openImageViewer = async (imageUrl: string) => {
   }
 };
 
-// 处理回车键（检查输入法状态）
-const handleEnterKey = (event: KeyboardEvent) => {
-  // 如果输入法正在组合输入，不发送消息
-  // 在 Mac 上，需要同时检查事件对象的 isComposing 属性和状态变量
-  // keyCode 229 表示 IME 正在处理输入
-  // 如果 compositionend 刚刚触发（100ms 内），也不发送（Mac 上 compositionend 可能在 keydown 之前触发）
-  const now = Date.now();
-  if (event.isComposing || isComposing.value || event.keyCode === 229 || (now - compositionEndTime.value < 100)) {
-    return;
-  }
-  sendMessage();
-};
-
-// 处理粘贴事件（从剪贴板粘贴图片）
-const handlePaste = async (event: ClipboardEvent) => {
-  // 如果正在发送，忽略粘贴
-  if (sending.value) {
-    return;
-  }
-
-  const clipboardData = event.clipboardData;
-  if (!clipboardData) {
-    return;
-  }
-
-  // 检查剪贴板中是否有图片
-  const items = Array.from(clipboardData.items);
-  const imageItem = items.find(item => item.type.startsWith('image/'));
-
-  if (imageItem) {
-    // 阻止默认粘贴行为（避免粘贴图片的 base64 文本到输入框）
-    event.preventDefault();
-
-    try {
-      const file = imageItem.getAsFile();
-      if (!file) {
-        return;
-      }
-
-      // 检查文件大小（限制为 10MB）
-      if (file.size > 10 * 1024 * 1024) {
-        alert('图片太大，请选择小于 10MB 的图片');
-        return;
-      }
-
-      // 创建预览
-      const preview = URL.createObjectURL(file);
-      selectedImages.value.push({ file, preview });
-    } catch (error) {
-      console.error('粘贴图片失败:', error);
-      alert('粘贴图片失败，请重试');
-    }
-  }
-};
 
 // 发送消息
 const sendMessage = async () => {
-  // 检查是否有内容（文本、图片或表情）
-  const hasText = inputText.value.trim().length > 0;
+  // 从富文本编辑器提取内容
+  const editorContent = extractContentFromEditor();
+  const hasText = editorContent.trim().length > 0;
   const hasImages = selectedImages.value.length > 0;
   
   if ((!hasText && !hasImages) || !props.chatId || !props.chatType || sending.value || !props.selfId) {
@@ -474,7 +642,7 @@ const sendMessage = async () => {
   
   // 解析输入框中的内容，将 CQ 码转换为数组元素
   if (hasText) {
-    const textContent = inputText.value.trim();
+    const textContent = editorContent.trim();
     const segments = parseCQCode(textContent);
     
     // 将解析后的段转换为消息数组
@@ -598,7 +766,9 @@ const sendMessage = async () => {
   });
   
   // 清空输入框和选中的图片
-  inputText.value = '';
+  if (inputEditorRef.value) {
+    inputEditorRef.value.innerHTML = '';
+  }
   // 清理预览 URL
   selectedImages.value.forEach(img => URL.revokeObjectURL(img.preview));
   selectedImages.value = [];
@@ -1231,18 +1401,19 @@ defineExpose({
             </div>
           </div>
         </div>
-        <textarea
-          v-model="inputText"
-          placeholder="输入消息... (Enter 发送, Shift+Enter 换行, Cmd/Ctrl+V 粘贴图片)"
-          rows="3"
-          @keydown.enter.exact.prevent="handleEnterKey"
-          @keydown.shift.enter.exact="inputText += '\n'"
+        <div
+          ref="inputEditorRef"
+          :contenteditable="!sending"
+          class="rich-input-editor"
+          :class="{ disabled: sending }"
+          data-placeholder="输入消息... (Enter 发送, Shift+Enter 换行, Cmd/Ctrl+V 粘贴图片)"
+          @input="handleEditorInput"
+          @paste="handleEditorPaste"
+          @keydown="handleEditorKeyDown"
           @compositionstart="isComposing = true; compositionEndTime = 0"
           @compositionupdate="isComposing = true"
           @compositionend="isComposing = false; compositionEndTime = Date.now()"
-          @paste="handlePaste"
-          :disabled="sending"
-        ></textarea>
+        ></div>
       </div>
     </div>
     <div v-else class="input-placeholder">
@@ -1683,6 +1854,52 @@ defineExpose({
   border-top: 1px solid #e0e0e0;
 }
 
+/* 富文本编辑器样式 */
+.rich-input-editor {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  line-height: 1.5;
+  min-height: 44px;
+  max-height: 120px;
+  overflow-y: auto;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  background: white;
+  outline: none;
+}
+
+.rich-input-editor:focus {
+  border-color: #2196f3;
+  box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.1);
+}
+
+.rich-input-editor:empty:before {
+  content: attr(data-placeholder);
+  color: #999;
+  pointer-events: none;
+}
+
+.rich-input-editor.disabled {
+  background: #f5f5f5;
+  cursor: not-allowed;
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* 输入框中的表情样式 */
+.input-face-emoji {
+  vertical-align: middle;
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  margin: 0 2px;
+  object-fit: contain;
+}
+
 .selected-images {
   display: flex;
   gap: 8px;
@@ -1832,23 +2049,6 @@ defineExpose({
   padding: 2px;
 }
 
-.input-container textarea {
-  flex: 1;
-  padding: 10px 14px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  font-size: 14px;
-  font-family: inherit;
-  resize: none;
-  min-height: 60px;
-  max-height: 120px;
-}
-
-.input-container textarea:focus {
-  outline: none;
-  border-color: #2196f3;
-  box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.1);
-}
 
 
 .input-placeholder {
