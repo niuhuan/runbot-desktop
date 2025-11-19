@@ -51,7 +51,13 @@ fn get_image_filename(url: &str) -> String {
     // 限制扩展名长度
     let ext = if ext.len() > 10 { "jpg" } else { ext };
     
-    format!("{}.{}", &hash_str[..16], ext)
+    // 将扩展名中的斜线替换为下划线（防止路径问题）
+    let ext_clean = ext.replace('/', "_").replace('\\', "_");
+    
+    // 将哈希字符串中的斜线也替换为下划线（虽然 base64 编码通常不会有斜线，但为了安全）
+    let hash_clean = hash_str.replace('/', "_").replace('\\', "_");
+    
+    format!("{}.{}", &hash_clean[..16], ext_clean)
 }
 
 /// 下载图片并保存到缓存（同步版本）
@@ -100,12 +106,21 @@ fn download_image_sync(url: &str, cache_path: &Path) -> Result<(), String> {
     
     // 确保父目录存在
     if let Some(parent) = cache_path.parent() {
-        tracing::debug!("[download_image_sync] 创建父目录: {:?}", parent);
-        fs::create_dir_all(parent)
-            .map_err(|e| {
-                tracing::error!("[download_image_sync] 创建图片缓存目录失败: {}", e);
-                format!("创建图片缓存目录失败: {}", e)
-            })?;
+        // 检查父目录是否是根目录（不应该尝试创建根目录）
+        if parent != Path::new("/") && !parent.as_os_str().is_empty() {
+            tracing::debug!("[download_image_sync] 创建父目录: {:?}", parent);
+            fs::create_dir_all(parent)
+                .map_err(|e| {
+                    tracing::error!("[download_image_sync] 创建图片缓存目录失败: {}", e);
+                    format!("创建图片缓存目录失败: {}", e)
+                })?;
+        } else {
+            tracing::error!("[download_image_sync] 无效的父目录路径: {:?}，完整路径: {:?}", parent, cache_path);
+            return Err(format!("无效的缓存路径: {:?}，父目录不能是根目录或空", cache_path));
+        }
+    } else {
+        tracing::error!("[download_image_sync] 无法获取父目录，完整路径: {:?}", cache_path);
+        return Err(format!("无效的缓存路径: {:?}，无法获取父目录", cache_path));
     }
     
     // 保存到文件
@@ -195,11 +210,36 @@ pub async fn download_image(
     let cache_dir = get_image_cache_dir(&app, self_id)?;
     tracing::debug!("[download_image] 缓存目录: {:?}", cache_dir);
     
+    // 验证缓存目录是否有效
+    if cache_dir.as_os_str().is_empty() {
+        return Err("缓存目录路径为空".to_string());
+    }
+    
     let filename = get_image_filename(&url);
     tracing::debug!("[download_image] 生成的文件名: {}", filename);
     
+    // 检查文件名是否包含路径分隔符或绝对路径标记
+    if filename.starts_with('/') || filename.contains(std::path::MAIN_SEPARATOR) {
+        tracing::error!("[download_image] 文件名包含路径分隔符，这是无效的: {}", filename);
+        return Err(format!("无效的文件名（包含路径分隔符）: {}", filename));
+    }
+    
     let cache_path = cache_dir.join(&filename);
     tracing::debug!("[download_image] 完整缓存路径: {:?}", cache_path);
+    
+    // 验证完整路径是否有效
+    // 在 Rust 中，如果 join 的参数是绝对路径（以 / 开头），join 会直接返回该路径
+    // 所以如果 cache_path 的父目录是根目录，说明 filename 可能是绝对路径
+    if cache_path.parent().is_none() || cache_path.parent() == Some(Path::new("/")) {
+        tracing::error!("[download_image] 无效的缓存路径: {:?}，缓存目录: {:?}，文件名: {}，可能的原因：文件名是绝对路径或缓存目录为空", cache_path, cache_dir, filename);
+        return Err(format!("无效的缓存路径: {:?}，文件名可能是绝对路径或缓存目录为空", cache_path));
+    }
+    
+    // 验证 cache_path 是否在 cache_dir 下（防止绝对路径问题）
+    if !cache_path.starts_with(&cache_dir) {
+        tracing::error!("[download_image] 缓存路径不在缓存目录下: {:?} 不在 {:?} 下，文件名: {}", cache_path, cache_dir, filename);
+        return Err(format!("缓存路径不在缓存目录下: {:?}", cache_path));
+    }
     
     // 先检查缓存
     if cache_path.exists() {
