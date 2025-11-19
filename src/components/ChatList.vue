@@ -1,9 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue';
-import { getMessages } from '../services/storage';
-import { parseCQCode } from '../utils/cqcode';
-import { getFaceDisplayText } from '../utils/qq-face';
-import { getContactName, getGroupName, useContactsState } from '../stores/contacts';
+import { ref, computed, onMounted, watch } from 'vue';
+import { getChatsState, updateChatList, setChatAvatarFailed, type ChatItem } from '../stores/chats';
+import { useContactsState } from '../stores/contacts';
 
 const props = defineProps<{
   selfId?: number;
@@ -13,184 +11,27 @@ const emit = defineEmits<{
   selectChat: [chat: ChatItem]
 }>();
 
-interface ChatItem {
-  id: string;
-  type: 'private' | 'group';
-  name: string;
-  avatar?: string;
-  avatarFailed?: boolean; // 标记头像是否加载失败
-  lastMessage?: string;
-  lastTime?: number;
-  unreadCount: number;
-  userId?: number;
-  groupId?: number;
-}
-
-const chats = ref<ChatItem[]>([]);
 const selectedChatId = ref<string | null>(null);
 
-// 使用全局联系人列表和群组列表
+// 使用全局对话列表状态
+// 直接获取 state 对象，确保响应式追踪正确
+const chatsState = getChatsState();
+// 直接使用 state.chats，确保响应式追踪
+const chats = computed(() => chatsState.chats);
+
+// 使用全局联系人列表和群组列表（用于触发更新）
 const contactsState = useContactsState();
 
-// 格式化消息预览（将图片和表情替换为文本）
-const formatMessagePreview = (message: string): string => {
-  if (!message) return '';
-  
-  const segments = parseCQCode(message);
-  const parts: string[] = [];
-  
-  for (const segment of segments) {
-    if (segment.type === 'text' && segment.text) {
-      parts.push(segment.text);
-    } else if (segment.type === 'image') {
-      // 检查是否是动画表情（sub_type=1 或有 summary）
-      const subType = segment.data.sub_type || '0';
-      const summary = segment.data.summary || '';
-      
-      // 解码 HTML 实体
-      const decodedSummary = summary
-        .replace(/&#91;/g, '[')
-        .replace(/&#93;/g, ']')
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'");
-      
-      if (subType === '1' || decodedSummary.includes('动画表情') || decodedSummary.includes('表情')) {
-        // 动画表情：有摘要显示摘要，否则显示 [动画表情]
-        if (decodedSummary) {
-          parts.push(`[${decodedSummary}]`);
-        } else {
-          parts.push('[动画表情]');
-        }
-      } else {
-        // 普通图片
-        parts.push('[图片]');
-      }
-    } else if (segment.type === 'face') {
-      // 使用表情 ID 获取表情名称
-      const faceId = segment.data.id || '';
-      parts.push(getFaceDisplayText(faceId));
-    } else if (segment.type === 'at') {
-      parts.push(`@${segment.data.qq || ''}`);
-    }
-  }
-  
-  return parts.join('');
-};
-
-// 从消息中提取聊天列表
-const updateChatList = async () => {
-  // 如果没有 selfId，清空列表（等待连接）
-  if (!props.selfId) {
-    chats.value = [];
-    return;
-  }
-
-  try {
-    // 获取最近的消息（按用户/群组分组）
-    // 优化：只获取最近的消息，减少查询时间
-    // 每个聊天只需要最新一条消息来显示在列表中
-    const messages = await getMessages({ 
-      limit: 500, // 减少到 500 条，通常足够显示所有聊天
-      selfId: props.selfId 
-    });
-
-    // 按用户/群组分组
-    const chatMap = new Map<string, ChatItem>();
-
-    messages.forEach((msg) => {
-      let chatId: string;
-      let chatName: string;
-      let chatType: 'private' | 'group';
-
-      if (msg.message_type === 'private' && msg.user_id) {
-        chatId = `private_${msg.user_id}`;
-        // 优先从联系人列表获取名称，其次从消息的 sender，最后使用默认格式
-        chatName = getContactName(msg.user_id);
-        chatType = 'private';
-      } else if (msg.message_type === 'group' && msg.group_id) {
-        chatId = `group_${msg.group_id}`;
-        // 优先从群组列表获取名称，其次尝试从消息的 raw 中获取，最后使用默认格式
-        chatName = getGroupName(msg.group_id);
-        chatType = 'group';
-      } else {
-        return; // 跳过其他类型的消息
-      }
-
-      if (!chatMap.has(chatId)) {
-        const chatItem: ChatItem = {
-          id: chatId,
-          type: chatType,
-          name: chatName,
-          unreadCount: 0,
-          userId: msg.user_id || undefined,
-          groupId: msg.group_id || undefined,
-        };
-        
-        // 头像将在 setChatAvatars 中统一设置
-        
-        chatMap.set(chatId, chatItem);
-      } else {
-        // 如果已存在，更新名称（可能联系人/群组列表已更新）
-        const existingChat = chatMap.get(chatId)!;
-        if (chatType === 'private' && msg.user_id) {
-          existingChat.name = getContactName(msg.user_id);
-        } else if (chatType === 'group' && msg.group_id) {
-          existingChat.name = getGroupName(msg.group_id);
-        }
-      }
-
-      const chat = chatMap.get(chatId)!;
-      
-      // 更新最后一条消息和时间
-      if (!chat.lastTime || msg.time > chat.lastTime) {
-        chat.lastTime = msg.time;
-        const rawMessage = msg.message || msg.raw_message || '';
-        chat.lastMessage = formatMessagePreview(rawMessage);
-      }
-    });
-
-    // 转换为数组并按时间排序
-    chats.value = Array.from(chatMap.values()).sort((a, b) => {
-      const timeA = a.lastTime || 0;
-      const timeB = b.lastTime || 0;
-      return timeB - timeA;
-    });
-    
-    // 更新后设置头像
-    setChatAvatars();
-  } catch (error) {
-    console.error('更新聊天列表失败:', error);
-  }
-};
-
-// 设置聊天头像 URL（直接使用 asset://avatar/ 格式）
-const setChatAvatars = () => {
-  for (const chat of chats.value) {
-    // 如果已经有头像或已经加载失败，跳过
-    if (chat.avatar || chat.avatarFailed) {
-      continue;
-    }
-    
-    if (chat.type === 'private' && chat.userId) {
-      chat.avatar = `asset://avatar/user/${chat.userId}.png`;
-    } else if (chat.type === 'group' && chat.groupId) {
-      chat.avatar = `asset://avatar/group/${chat.groupId}.png`;
-    }
-  }
+// 更新聊天列表（调用全局 store 的方法）
+const refreshChatList = async () => {
+  await updateChatList(props.selfId);
 };
 
 // 处理头像加载错误
 const handleAvatarError = (event: Event, chatId: string) => {
   const img = event.target as HTMLImageElement;
-  // 找到对应的聊天并清除头像 URL，标记为失败，避免重复加载
-  const chat = chats.value.find(c => c.id === chatId);
-  if (chat) {
-    chat.avatar = undefined;
-    chat.avatarFailed = true; // 标记为失败，避免重复尝试
-  }
+  // 使用 store 方法更新头像加载失败状态
+  setChatAvatarFailed(chatId, true);
   img.style.display = 'none';
 };
 
@@ -199,41 +40,55 @@ const selectChat = (chat: ChatItem) => {
   emit('selectChat', chat);
 };
 
+// 监听全局对话列表状态变化（确保组件能响应全局状态的更新）
+// 使用 immediate: true 确保在初始化时也能触发，这样即使全局状态在组件挂载前已更新，也能正确显示
+watch(() => chatsState.chats, (newChats, oldChats) => {
+  console.log('[ChatList] 全局对话列表状态已更新，当前对话数:', newChats.length, '之前:', oldChats?.length || 0);
+  // 这里不需要做任何操作，因为 chats computed 会自动更新
+  // 但添加这个 watch 可以确保响应式系统知道需要追踪这个变化
+}, { deep: true, immediate: true });
+
 // 监听 selfId 变化，当有值时立即更新聊天列表
-watch(() => props.selfId, () => {
-  // 无论 selfId 是否有值，都更新列表
-  // 如果没有 selfId，会显示空列表（等待连接）
-  updateChatList();
+watch(() => props.selfId, async (newSelfId, oldSelfId) => {
+  // 如果 selfId 从无到有，或者发生了变化，更新列表
+  if (newSelfId && newSelfId !== oldSelfId) {
+    console.log('[ChatList] selfId 变化，更新聊天列表:', newSelfId);
+    await refreshChatList();
+  } else if (!newSelfId) {
+    // 如果没有 selfId，清空列表
+    console.log('[ChatList] 没有 selfId，清空列表');
+    const { getChatsState } = await import('../stores/chats');
+    getChatsState().chats = [];
+  }
 }, { immediate: true });
 
 // 监听全局联系人列表和群组列表变化，更新聊天列表
 watch(() => [contactsState.contacts, contactsState.groups], () => {
   // 只有在有 selfId 时才更新（避免不必要的查询）
   if (props.selfId) {
-    updateChatList();
+    console.log('[ChatList] 联系人/群组列表变化，更新聊天列表');
+    refreshChatList();
   }
 }, { deep: true });
 
-// 监听聊天列表变化，设置头像
-watch(() => chats.value, () => {
-  setChatAvatars();
-}, { deep: true });
-
-// 监听 selfId 变化，重新设置头像
-watch(() => props.selfId, () => {
+onMounted(async () => {
+  // 组件挂载时，如果全局状态已经有数据，直接使用（不需要重新加载）
+  // 如果全局状态为空且有 selfId，则主动加载
   if (props.selfId) {
-    setChatAvatars();
+    if (chatsState.chats.length === 0) {
+      console.log('[ChatList] 组件挂载，有 selfId 但全局状态为空，主动加载聊天列表:', props.selfId);
+      await refreshChatList();
+    } else {
+      console.log('[ChatList] 组件挂载，全局状态已有数据，直接使用，对话数:', chatsState.chats.length);
+    }
+  } else {
+    console.log('[ChatList] 组件挂载，没有 selfId，等待连接');
   }
-});
-
-onMounted(() => {
-  // 立即尝试更新（如果没有 selfId，会显示空列表）
-  updateChatList();
 });
 
 // 暴露更新方法供父组件调用
 defineExpose({
-  updateChatList,
+  updateChatList: refreshChatList,
 });
 </script>
 

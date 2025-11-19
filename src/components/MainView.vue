@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { runbotService } from '../services/runbot';
 import { useConnectionState, initConnectionStore, getConnectionState } from '../stores/connection';
 import { initContactsStore } from '../stores/contacts';
+import { initChatsStore, updateChatFromMessage, updateChatList } from '../stores/chats';
 import { updateConfig } from '../services/config';
 import { saveMessage } from '../services/storage';
 import ChatList from './ChatList.vue';
@@ -266,6 +267,9 @@ onMounted(async () => {
   
   // 初始化全局联系人列表和群组列表管理
   initContactsStore();
+  
+  // 初始化全局对话列表管理
+  initChatsStore();
 
   // 同步全局 self_id 到本地 ref（用于向后兼容）
   const connectionState = getConnectionState();
@@ -276,11 +280,22 @@ onMounted(async () => {
     if (status.status === 'disconnected' || status.status === 'error') {
       emit('disconnect');
     } else if (status.status === 'connected' && selfId.value) {
-      // 连接成功且有 self_id 时，主动加载联系人列表和群组列表
+      // 连接成功且有 self_id 时，先立即加载对话列表，然后再获取联系人列表和群组列表
       try {
+        // 1. 先立即加载对话列表（从数据库）
+        console.log('[MainView] 连接成功且有 self_id，先加载对话列表（从数据库）');
+        await updateChatList(selfId.value);
+        
+        // 2. 然后获取联系人列表和群组列表
         console.log('[MainView] 连接成功且有 self_id，主动加载联系人列表和群组列表');
         await runbotService.getFriendList();
         await runbotService.getGroupList();
+        // 等待一下，确保数据已经更新到全局 store
+        await nextTick();
+        
+        // 3. 最后再次更新全局对话列表（因为联系人/群组名称可能已更新）
+        console.log('[MainView] 联系人/群组列表已更新，重新加载对话列表');
+        await updateChatList(selfId.value);
       } catch (error) {
         console.error('[MainView] 加载联系人/群组列表失败:', error);
       }
@@ -290,39 +305,49 @@ onMounted(async () => {
   // 监听 self_id 更新事件
   const selfIdUnlisten = await listen<number>('runbot-self-id', async (event) => {
     selfId.value = event.payload;
-    // 获取到 self_id 后，主动加载联系人列表和群组列表
+    // 获取到 self_id 后，先立即加载对话列表，然后再获取联系人列表和群组列表
     if (selfId.value && connectionStatus.status === 'connected') {
       try {
+        // 1. 先立即加载对话列表（从数据库）
+        console.log('[MainView] 获取到 self_id，先加载对话列表（从数据库）');
+        await updateChatList(selfId.value);
+        
+        // 2. 然后获取联系人列表和群组列表
         console.log('[MainView] 获取到 self_id，主动加载联系人列表和群组列表');
         await runbotService.getFriendList();
         await runbotService.getGroupList();
         // 等待一下，确保数据已经更新到全局 store
         await nextTick();
-        // 更新聊天列表
-        if (chatListRef.value) {
-          chatListRef.value.updateChatList();
-        }
+        
+        // 3. 最后再次更新全局对话列表（因为联系人/群组名称可能已更新）
+        console.log('[MainView] 联系人/群组列表已更新，重新加载对话列表');
+        await updateChatList(selfId.value);
       } catch (error) {
         console.error('[MainView] 加载联系人/群组列表失败:', error);
       }
     }
   });
   
-  // 在组件挂载时，如果已经连接且有 self_id，主动获取一次联系人列表和群组列表
-  // 这可以确保刚打开应用时，如果已经连接，也能获取到最新的群组名称
+  // 在组件挂载时，如果已经连接且有 self_id，先立即加载对话列表（从数据库）
+  // 然后再获取联系人列表和群组列表，最后再次更新对话列表（因为名称可能已更新）
   if (selfId.value && connectionStatus.status === 'connected') {
     try {
+      // 1. 先立即加载对话列表（从数据库），让用户能看到消息列表
+      console.log('[MainView] 组件挂载时，先加载对话列表（从数据库）');
+      await updateChatList(selfId.value);
+      
+      // 2. 然后获取联系人列表和群组列表
       console.log('[MainView] 组件挂载时，主动加载联系人列表和群组列表');
       await runbotService.getFriendList();
       await runbotService.getGroupList();
       // 等待一下，确保数据已经更新到全局 store
       await nextTick();
-      // 更新聊天列表
-      if (chatListRef.value) {
-        chatListRef.value.updateChatList();
-      }
+      
+      // 3. 最后再次更新全局对话列表（因为联系人/群组名称可能已更新）
+      console.log('[MainView] 组件挂载时，联系人/群组列表已更新，重新加载对话列表');
+      await updateChatList(selfId.value);
     } catch (error) {
-      console.error('[MainView] 组件挂载时加载联系人/群组列表失败:', error);
+      console.error('[MainView] 组件挂载时加载失败:', error);
     }
   }
 
@@ -412,14 +437,12 @@ onMounted(async () => {
         updateGroups(groups);
         // 同时更新本地引用（用于向后兼容）
         groupsList.value = groups;
-        setTimeout(() => {
+        setTimeout(async () => {
           if (groupListRef.value) {
             groupListRef.value.updateGroups(groups);
           }
-          // 更新聊天列表，确保群组名称正确显示
-          if (chatListRef.value) {
-            chatListRef.value.updateChatList();
-          }
+          // 更新全局对话列表，确保群组名称正确显示
+          await updateChatList(selfId.value || undefined);
         }, 100);
       }
       
@@ -471,10 +494,8 @@ onMounted(async () => {
         chatAreaRef.value.addMessage(message);
       }
       
-      // 更新聊天列表
-      if (chatListRef.value) {
-        chatListRef.value.updateChatList();
-      }
+      // 更新全局对话列表
+      updateChatFromMessage(message, selfId.value || undefined);
       
       return; // 发送的消息不需要后续处理
     }
@@ -494,10 +515,8 @@ onMounted(async () => {
       chatAreaRef.value.addMessage(message);
     }
     
-    // 更新聊天列表
-    if (chatListRef.value) {
-      chatListRef.value.updateChatList();
-    }
+    // 更新全局对话列表
+    updateChatFromMessage(message, selfId.value || undefined);
   });
 
   onBeforeUnmount(() => {
