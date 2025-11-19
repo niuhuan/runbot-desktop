@@ -27,12 +27,8 @@ onMounted(async () => {
   // 初始化全局连接状态管理
   await initConnectionStore();
 
-  // 检查当前连接状态，如果已经断开，确保清除自动登录标志
-  const currentStatus = connectionStatus.status;
-  if (currentStatus === 'disconnected' || currentStatus === 'error') {
-    // 如果当前状态是断开或错误，清除自动登录标志
-    await updateConfig({ lastConnected: false });
-  }
+  // 等待一小段时间，确保如果是从 MainView 切换过来的，配置已经更新完成
+  await new Promise(resolve => setTimeout(resolve, 200));
 
   const savedConfig = await loadConfig();
   let shouldAutoConnect = false;
@@ -40,14 +36,19 @@ onMounted(async () => {
     wsUrl.value = savedConfig.wsUrl;
     accessToken.value = savedConfig.accessToken || '';
     
-    // 如果上次是登录状态，且当前连接状态不是 disconnected/error，才自动连接
-    // 这样可以避免在断开连接后立即重新连接
-    if (savedConfig.lastConnected && savedConfig.wsUrl && 
-        currentStatus !== 'disconnected' && currentStatus !== 'error') {
-      shouldAutoConnect = true;
-    } else if (savedConfig.lastConnected) {
-      // 如果配置中有 lastConnected 但当前状态是断开，清除它
-      await updateConfig({ lastConnected: false });
+    // 如果上次是登录状态，且有 wsUrl，则自动连接
+    // 注意：初始化时连接状态通常是 'disconnected'，这是正常的，不应该阻止自动登录
+    // 但是，如果连接状态是 'disconnected' 且刚刚切换过来，可能是用户主动退出登录
+    // 所以需要再次检查配置，确保 lastConnected 确实为 true
+    if (savedConfig.lastConnected && savedConfig.wsUrl) {
+      // 再次读取配置，确保获取到最新的值（防止时序问题）
+      const latestConfig = await loadConfig();
+      if (latestConfig && latestConfig.lastConnected && latestConfig.wsUrl) {
+        shouldAutoConnect = true;
+        console.log('[Login] 检测到上次登录状态，准备自动连接');
+      } else {
+        console.log('[Login] 配置已更新，取消自动连接');
+      }
     }
   }
   

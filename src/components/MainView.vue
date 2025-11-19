@@ -82,12 +82,32 @@ const chatAreaRef = ref<InstanceType<typeof ChatArea> | null>(null);
 // 断开连接
 const handleDisconnect = async () => {
   try {
-    // 先更新配置，清除自动登录标志（在断开连接之前）
+    // 先保存当前的 selfId（在清空之前）
     const currentSelfId = selfId.value;
-    await updateConfig({ lastConnected: false }, currentSelfId || undefined);
+    
+    // 在断开连接之前，先更新配置，清除自动登录标志
+    // 这样确保配置已经写入文件系统，即使断开连接失败也能正确保存状态
+    console.log('[MainView] 退出登录：正在清除自动登录标志...');
+    try {
+      // 同时清除用户特定配置和全局配置（因为登录页面可能读取全局配置）
+      if (currentSelfId) {
+        await updateConfig({ lastConnected: false }, currentSelfId);
+        console.log('[MainView] 已清除用户特定配置的自动登录标志 (selfId:', currentSelfId, ')');
+      }
+      // 也清除全局配置（不使用 selfId）
+      await updateConfig({ lastConnected: false });
+      console.log('[MainView] 已清除全局配置的自动登录标志');
+    } catch (configError) {
+      console.error('[MainView] 清除自动登录标志失败:', configError);
+      // 即使配置更新失败，也继续执行断开连接
+    }
+    
+    // 确保配置已经写入完成（等待文件系统同步）
+    await new Promise(resolve => setTimeout(resolve, 200));
     
     // 然后断开连接
     await runbotService.disconnect();
+    console.log('[MainView] 已断开连接');
     
     // 清空状态
     selfId.value = null;
@@ -98,11 +118,21 @@ const handleDisconnect = async () => {
   } catch (error) {
     console.error('断开连接失败:', error);
     // 即使断开连接失败，也要清除自动登录标志
+    const currentSelfId = selfId.value;
     try {
-      await updateConfig({ lastConnected: false }, selfId.value || undefined);
+      if (currentSelfId) {
+        await updateConfig({ lastConnected: false }, currentSelfId);
+      }
+      await updateConfig({ lastConnected: false });
+      console.log('[MainView] 已清除自动登录标志（错误处理）');
+      // 等待配置写入完成
+      await new Promise(resolve => setTimeout(resolve, 200));
     } catch (configError) {
-      console.error('清除自动登录标志失败:', configError);
+      console.error('[MainView] 清除自动登录标志失败:', configError);
     }
+    // 清空状态
+    selfId.value = null;
+    currentChat.value = { type: null, id: null, name: '' };
     // 仍然触发 disconnect 事件
     emit('disconnect');
   }
