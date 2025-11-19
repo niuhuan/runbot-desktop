@@ -14,7 +14,7 @@
   "dependencies": {
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
-    "qface": "file:../third/QFace",
+    "qface": "^1.4.1",
     "vue": "^3.5.13"
   },
   "devDependencies": {
