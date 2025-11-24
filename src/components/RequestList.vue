@@ -184,7 +184,9 @@ defineExpose({
 
     <div class="list-content">
       <div v-if="displayRequests.length === 0" class="empty-state">
-        <div class="empty-icon">📭</div>
+        <svg class="empty-icon" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M20 6h-2.18c.11-.31.18-.65.18-1 0-1.66-1.34-3-3-3-1.05 0-1.96.54-2.5 1.35l-.5.67-.5-.68C10.96 2.54 10.05 2 9 2 7.34 2 6 3.34 6 5c0 .35.07.69.18 1H4c-1.11 0-1.99.89-1.99 2L2 19c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-5-2c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zM9 4c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm11 15H4v-2h16v2zm0-5H4V8h5.08L7 10.83 8.62 12 11 8.76l1-1.36 1 1.36L15.38 12 17 10.83 14.92 8H20v6z"/>
+        </svg>
         <div class="empty-text">
           {{ selectedTab === 'pending' ? '暂无待处理请求' : '暂无历史记录' }}
         </div>
@@ -231,10 +233,16 @@ defineExpose({
           <!-- 已处理状态显示结果 -->
           <div v-else class="request-status">
             <span v-if="request.status === 'approved'" class="status-approved">
-              ✓ 已同意
+              <svg class="status-icon" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
+              </svg>
+              已同意
             </span>
             <span v-else-if="request.status === 'rejected'" class="status-rejected">
-              ✗ 已拒绝
+              <svg class="status-icon" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"/>
+              </svg>
+              已拒绝
             </span>
           </div>
         </div>
@@ -331,8 +339,10 @@ defineExpose({
 }
 
 .empty-icon {
-  font-size: 48px;
+  width: 64px;
+  height: 64px;
   margin-bottom: 16px;
+  opacity: 0.5;
 }
 
 .empty-text {
@@ -497,10 +507,21 @@ defineExpose({
 }
 
 .status-approved {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   color: #4caf50;
 }
 
 .status-rejected {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   color: #f44336;
+}
+
+.status-icon {
+  width: 18px;
+  height: 18px;
 }
 </style>
