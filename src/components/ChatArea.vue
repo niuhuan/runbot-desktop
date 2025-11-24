@@ -60,6 +60,9 @@ const contextMenuX = ref(0);
 const contextMenuY = ref(0);
 const contextMenuMessage = ref<OneBotMessage | null>(null);
 
+// 回复状态
+const replyToMessage = ref<OneBotMessage | null>(null);
+
 // 过滤当前聊天的消息（包括发送的消息）
 const filteredMessages = computed(() => {
   if (!props.chatId || !props.chatType) return [];
@@ -894,6 +897,16 @@ const sendMessage = async () => {
   // 构建消息数组（根据 NapCat API 文档格式）
   const messageArray: Array<{ type: string; data: Record<string, any> }> = [];
   
+  // 如果是回复消息，在消息开头添加 reply 段
+  if (replyToMessage.value && replyToMessage.value.message_id) {
+    messageArray.push({
+      type: 'reply',
+      data: {
+        id: replyToMessage.value.message_id.toString(),
+      },
+    });
+  }
+  
   // 解析输入框中的内容，将 CQ 码转换为数组元素
   // @ 已经在 extractContentFromEditor 中转换为 [CQ:at,qq=userId] 了
   if (hasText) {
@@ -988,6 +1001,8 @@ const sendMessage = async () => {
       return `[CQ:face,id=${item.data.id}]`;
     } else if (item.type === 'at') {
       return `[CQ:at,qq=${item.data.qq}]`;
+    } else if (item.type === 'reply') {
+      return `[CQ:reply,id=${item.data.id}]`;
     }
     return '';
   }).join('');
@@ -1040,6 +1055,9 @@ const sendMessage = async () => {
   // 清理预览 URL
   selectedImages.value.forEach(img => URL.revokeObjectURL(img.preview));
   selectedImages.value = [];
+  
+  // 清空回复状态
+  replyToMessage.value = null;
   
   // 同时清空聊天输入状态
   if (props.chatId && props.chatType) {
@@ -1369,6 +1387,32 @@ const renderReplyMessage = (msg: OneBotMessage): any[] => {
   });
 };
 
+// 获取消息的纯文本内容（用于回复预览）
+const getMessagePreviewText = (segments: CQSegment[]): string => {
+  return segments.map(segment => {
+    if (segment.type === 'text' && segment.text) {
+      return segment.text;
+    } else if (segment.type === 'image') {
+      return '[图片]';
+    } else if (segment.type === 'face') {
+      return getFaceDisplayText(segment.data.id || '');
+    } else if (segment.type === 'at') {
+      const userId = segment.data.qq || '';
+      if (props.chatType === 'group' && props.chatId && userId) {
+        const memberName = getGroupMemberDisplayName(props.chatId, parseInt(userId));
+        if (memberName !== `用户 ${userId}`) {
+          return `@${memberName}`;
+        }
+      }
+      return `@${userId}`;
+    } else if (segment.type === 'reply') {
+      return '[回复消息]';
+    } else {
+      return `[CQ:${segment.type}]`;
+    }
+  }).join('');
+};
+
 // 获取发送者名称
 const getSenderName = (msg: OneBotMessage): string => {
   // 如果是自己发送的消息，显示"我"
@@ -1405,20 +1449,6 @@ const scrollToBottom = () => {
   });
 };
 
-// 保存当前聊天的输入状态
-const saveCurrentInputState = () => {
-  if (!props.chatId || !props.chatType || !inputEditorRef.value) return;
-  
-  const editorHtml = inputEditorRef.value.innerHTML || '';
-  
-  console.log('[saveCurrentInputState] 保存输入状态:', props.chatType, props.chatId, '内容长度:', editorHtml.length);
-  
-  updateChatInputState(props.chatType, props.chatId, {
-    editorHtml,
-    selectedImages: selectedImages.value,
-  });
-};
-
 // 恢复当前聊天的输入状态
 const restoreInputState = () => {
   if (!props.chatId || !props.chatType) {
@@ -1446,7 +1476,7 @@ const restoreInputState = () => {
 };
 
 // 监听聊天变化
-watch(() => [props.chatId, props.chatType], (newVal, oldVal) => {
+watch(() => [props.chatId, props.chatType], (_newVal, oldVal) => {
   // 保存旧聊天的输入状态
   if (oldVal && oldVal[0] && oldVal[1] && inputEditorRef.value) {
     const oldChatType = oldVal[1] as 'private' | 'group';
@@ -1463,6 +1493,9 @@ watch(() => [props.chatId, props.chatType], (newVal, oldVal) => {
   
   // 重置头像加载失败状态
   chatAvatarFailed.value = false;
+  
+  // 清空回复状态
+  replyToMessage.value = null;
   
   if (props.chatId && props.chatType) {
     loadChatMessages();
@@ -1583,36 +1616,12 @@ onUnmounted(() => {
 const showMessageContextMenu = (event: MouseEvent, msg: OneBotMessage) => {
   console.log('[ChatArea] 右键点击消息:', msg);
   
-  // 只有自己发送的消息且未被撤回才能撤回
-  if (msg.post_type !== 'message_sent') {
-    console.log('[ChatArea] 不是自己发送的消息，不显示撤回选项');
-    return;
-  }
-  
-  if (msg.recalled) {
-    console.log('[ChatArea] 消息已被撤回');
-    return;
-  }
-  
-  // 检查消息是否在2分钟内（120秒）
-  const now = Math.floor(Date.now() / 1000);
-  const messageTime = msg.time;
-  const timeDiff = now - messageTime;
-  
-  console.log('[ChatArea] 消息时间检查:', { now, messageTime, timeDiff, limit: 120 });
-  
-  if (timeDiff > 120) {
-    console.warn('[ChatArea] 消息超过2分钟，无法撤回');
-    return;
-  }
-  
   event.preventDefault();
-  console.log('[ChatArea] 显示右键菜单');
   contextMenuMessage.value = msg;
   
   // 计算菜单位置，确保不超出视窗
   const menuWidth = 120; // 菜单宽度
-  const menuHeight = 40; // 菜单高度
+  const menuHeight = 80; // 菜单高度（增加了回复选项）
   const windowWidth = window.innerWidth;
   const windowHeight = window.innerHeight;
   
@@ -1638,6 +1647,48 @@ const showMessageContextMenu = (event: MouseEvent, msg: OneBotMessage) => {
 const closeContextMenu = () => {
   showContextMenu.value = false;
   contextMenuMessage.value = null;
+};
+
+// 判断消息是否可以撤回
+const canRecallMessage = (msg: OneBotMessage | null): boolean => {
+  if (!msg) return false;
+  
+  // 只有自己发送的消息且未被撤回才能撤回
+  if (msg.post_type !== 'message_sent') return false;
+  if (msg.recalled) return false;
+  
+  // 检查消息是否在2分钟内（120秒）
+  const now = Math.floor(Date.now() / 1000);
+  const messageTime = msg.time;
+  const timeDiff = now - messageTime;
+  
+  return timeDiff <= 120;
+};
+
+// 回复消息
+const replyMessage = () => {
+  if (!contextMenuMessage.value) return;
+  
+  // 不能回复已撤回的消息
+  if (contextMenuMessage.value.recalled) {
+    console.warn('[ChatArea] 无法回复已撤回的消息');
+    closeContextMenu();
+    return;
+  }
+  
+  console.log('[ChatArea] 设置回复消息:', contextMenuMessage.value);
+  replyToMessage.value = contextMenuMessage.value;
+  closeContextMenu();
+  
+  // 聚焦到输入框
+  nextTick(() => {
+    inputEditorRef.value?.focus();
+  });
+};
+
+// 取消回复
+const cancelReply = () => {
+  replyToMessage.value = null;
 };
 
 // 撤回消息
@@ -1957,6 +2008,19 @@ defineExpose({
         </div>
       </div>
       
+      <!-- 回复消息预览 -->
+      <div v-if="replyToMessage" class="reply-preview">
+        <div class="reply-preview-content">
+          <div class="reply-preview-header">
+            <span class="reply-preview-label">回复 {{ getSenderName(replyToMessage) }}</span>
+            <button class="reply-preview-close" @click="cancelReply" title="取消回复">×</button>
+          </div>
+          <div class="reply-preview-text">
+            {{ getMessagePreviewText(parseMessage(replyToMessage)) }}
+          </div>
+        </div>
+      </div>
+      
       <div class="input-container">
         <input
           ref="fileInputRef"
@@ -2076,7 +2140,14 @@ defineExpose({
       :style="{ left: `${contextMenuX}px`, top: `${contextMenuY}px` }"
       @click.stop
     >
-      <div class="context-menu-item" @click="recallMessage">
+      <div class="context-menu-item" @click="replyMessage">
+        <span>回复</span>
+      </div>
+      <div 
+        v-if="canRecallMessage(contextMenuMessage)"
+        class="context-menu-item" 
+        @click="recallMessage"
+      >
         <span>撤回消息</span>
       </div>
     </div>
@@ -2781,6 +2852,63 @@ defineExpose({
   padding: 16px;
   background: white;
   border-top: 1px solid #e8e8e8;
+}
+
+/* 回复消息预览 */
+.reply-preview {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  background: #f0f9ff;
+  border-left: 3px solid #0088cc;
+  border-radius: 6px;
+}
+
+.reply-preview-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reply-preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.reply-preview-label {
+  font-size: 13px;
+  color: #0088cc;
+  font-weight: 500;
+}
+
+.reply-preview-close {
+  background: none;
+  border: none;
+  color: #8e8e93;
+  font-size: 20px;
+  cursor: pointer;
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.reply-preview-close:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: #333;
+}
+
+.reply-preview-text {
+  font-size: 13px;
+  color: #666;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 /* 富文本编辑器样式 */
