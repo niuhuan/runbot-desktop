@@ -4,6 +4,7 @@ import { runbotService, type OneBotMessage } from '../services/runbot';
 import { getMessages, saveMessage } from '../services/storage';
 import { parseCQCode, type CQSegment } from '../utils/cqcode';
 import { getFaceDisplayText, getFaceImageUrl } from '../utils/qq-face';
+import { getGroupMemberDisplayName } from '../stores/group-members';
 import qface from 'qface';
 import { checkImageCache, downloadImage } from '../services/image';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
@@ -1002,9 +1003,21 @@ const renderMessage = (segments: CQSegment[]): any[] => {
         key: `face-${index}`,
       };
     } else if (segment.type === 'at') {
+      const userId = segment.data.qq || '';
+      let displayName = `@${userId}`;
+      
+      // 如果是群聊，尝试从群成员缓存中获取昵称
+      if (props.chatType === 'group' && props.chatId && userId) {
+        const memberName = getGroupMemberDisplayName(props.chatId, parseInt(userId));
+        if (memberName !== `用户 ${userId}`) {
+          displayName = `@${memberName}`;
+        }
+      }
+      
       return {
         type: 'at',
-        qq: segment.data.qq || '',
+        qq: userId,
+        displayName,
         key: `at-${index}`,
       };
     } else {
@@ -1438,7 +1451,7 @@ defineExpose({
                     />
                     <span v-else class="cq-face">{{ getFaceDisplayText(item.id) }}</span>
                   </template>
-                  <span v-else-if="item.type === 'at'" class="cq-at">@{{ item.qq }}</span>
+                  <span v-else-if="item.type === 'at'" class="cq-at">{{ item.displayName || `@${item.qq}` }}</span>
                 </template>
               </div>
             </div>

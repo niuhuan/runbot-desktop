@@ -6,6 +6,7 @@ import { useConnectionState, initConnectionStore, getConnectionState } from '../
 import { initContactsStore, getContactName, getGroupName } from '../stores/contacts';
 import { initChatsStore, updateChatFromMessage, updateChatList, clearUnreadCount } from '../stores/chats';
 import { useRequestsStore } from '../stores/requests';
+import { updateGroupMembers, updateGroupMember, isGroupMembersCacheExpired } from '../stores/group-members';
 import { updateConfig } from '../services/config';
 import { saveMessage } from '../services/storage';
 import { initNotificationPermission, notifyChatMessage } from '../services/notify';
@@ -236,7 +237,7 @@ const getMenuStyle = () => {
 };
 
 // 选择聊天
-const handleSelectChat = (chat: { type: 'private' | 'group'; userId?: number; groupId?: number; name: string }) => {
+const handleSelectChat = async (chat: { type: 'private' | 'group'; userId?: number; groupId?: number; name: string }) => {
   currentChat.value = {
     type: chat.type,
     id: chat.type === 'private' ? chat.userId! : chat.groupId!,
@@ -246,6 +247,18 @@ const handleSelectChat = (chat: { type: 'private' | 'group'; userId?: number; gr
   // 清除该对话的未读消息数
   const chatId = chat.type === 'private' ? `private_${chat.userId}` : `group_${chat.groupId}`;
   clearUnreadCount(chatId);
+  
+  // 如果是群聊，自动加载群成员列表（如果缓存过期）
+  if (chat.type === 'group' && chat.groupId) {
+    if (isGroupMembersCacheExpired(chat.groupId)) {
+      console.log(`[MainView] 群 ${chat.groupId} 成员缓存已过期，重新加载`);
+      try {
+        await runbotService.getGroupMemberList(chat.groupId);
+      } catch (error) {
+        console.error(`加载群 ${chat.groupId} 成员列表失败:`, error);
+      }
+    }
+  }
 };
 
 // 选择联系人
@@ -261,7 +274,7 @@ const handleSelectContact = (contact: { userId: number; nickname: string }) => {
 };
 
 // 选择群组
-const handleSelectGroup = (group: { groupId: number; groupName: string }) => {
+const handleSelectGroup = async (group: { groupId: number; groupName: string }) => {
   currentChat.value = {
     type: 'group',
     id: group.groupId,
@@ -270,12 +283,18 @@ const handleSelectGroup = (group: { groupId: number; groupName: string }) => {
   
   // 清除该对话的未读消息数
   clearUnreadCount(`group_${group.groupId}`);
-  currentChat.value = {
-    type: 'group',
-    id: group.groupId,
-    name: group.groupName,
-  };
+  
+  // 自动加载群成员列表（如果缓存过期）
+  if (isGroupMembersCacheExpired(group.groupId)) {
+    console.log(`[MainView] 群 ${group.groupId} 成员缓存已过期，重新加载`);
+    try {
+      await runbotService.getGroupMemberList(group.groupId);
+    } catch (error) {
+      console.error(`加载群 ${group.groupId} 成员列表失败:`, error);
+    }
+  }
 };
+
 
 // 监听状态变化
 let statusUnlisten: (() => void) | null = null;
@@ -488,6 +507,63 @@ onMounted(async () => {
           // 更新全局对话列表，确保群组名称正确显示
           await updateChatList(selfId.value || undefined);
         }, 100);
+      }
+      
+      // 处理群成员列表响应
+      const isGroupMemberListResponse = action === 'get_group_member_list' ||
+                                       (message.echo && message.echo.includes('get_group_member_list')) ||
+                                       (message.raw && (message.raw as any).echo &&
+                                        String((message.raw as any).echo).includes('get_group_member_list'));
+      
+      if (isGroupMemberListResponse && responseData && Array.isArray(responseData)) {
+        // 从 echo 中提取 groupId
+        let groupId: number | undefined;
+        const echoStr = message.echo || (message.raw as any)?.echo;
+        if (echoStr) {
+          const match = String(echoStr).match(/get_group_member_list_(\d+)/);
+          if (match) {
+            groupId = parseInt(match[1]);
+          }
+        }
+        
+        if (groupId) {
+          const members = responseData.map((item: any) => ({
+            groupId: groupId!,
+            userId: item.user_id,
+            nickname: item.nickname || `用户 ${item.user_id}`,
+            card: item.card,
+            role: item.role,
+            joinTime: item.join_time,
+            lastSentTime: item.last_sent_time,
+            level: item.level,
+            title: item.title,
+          }));
+          
+          console.log(`[MainView] 收到群 ${groupId} 的成员列表，共 ${members.length} 人`);
+          updateGroupMembers(groupId, members);
+        }
+      }
+      
+      // 处理群成员信息响应（单个）
+      const isGroupMemberInfoResponse = action === 'get_group_member_info' ||
+                                       (message.echo && message.echo.includes('get_group_member_info')) ||
+                                       (message.raw && (message.raw as any).echo &&
+                                        String((message.raw as any).echo).includes('get_group_member_info'));
+      
+      if (isGroupMemberInfoResponse && responseData) {
+        const member = {
+          groupId: responseData.group_id,
+          userId: responseData.user_id,
+          nickname: responseData.nickname || `用户 ${responseData.user_id}`,
+          card: responseData.card,
+          role: responseData.role,
+          joinTime: responseData.join_time,
+          lastSentTime: responseData.last_sent_time,
+          level: responseData.level,
+          title: responseData.title,
+        };
+        
+        updateGroupMember(member.groupId, member);
       }
       
       // 处理用户状态响应
@@ -1105,8 +1181,8 @@ watch(() => selfId.value, (newSelfId) => {
 }
 
 .nav-item.active {
-  background: rgba(0, 136, 204, 0.15);
-  color: #0088cc;
+  background: linear-gradient(90deg, rgba(139, 195, 240, 0.25) 0%, rgba(139, 195, 240, 0.08) 100%);
+  color: #8bc3f0;
 }
 
 .nav-item.active::before {
@@ -1117,7 +1193,7 @@ watch(() => selfId.value, (newSelfId) => {
   transform: translateY(-50%);
   width: 3px;
   height: 24px;
-  background: #0088cc;
+  background: #8bc3f0;
   border-radius: 0 2px 2px 0;
 }
 
