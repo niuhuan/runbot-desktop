@@ -3,10 +3,11 @@ import { ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue';
 import { listen } from '@tauri-apps/api/event';
 import { runbotService } from '../services/runbot';
 import { useConnectionState, initConnectionStore, getConnectionState } from '../stores/connection';
-import { initContactsStore } from '../stores/contacts';
-import { initChatsStore, updateChatFromMessage, updateChatList } from '../stores/chats';
+import { initContactsStore, getContactName, getGroupName } from '../stores/contacts';
+import { initChatsStore, updateChatFromMessage, updateChatList, clearUnreadCount } from '../stores/chats';
 import { updateConfig } from '../services/config';
 import { saveMessage } from '../services/storage';
+import { initNotificationPermission, notifyChatMessage } from '../services/notify';
 import ChatList from './ChatList.vue';
 import ContactList from './ContactList.vue';
 import GroupList from './GroupList.vue';
@@ -237,6 +238,10 @@ const handleSelectChat = (chat: { type: 'private' | 'group'; userId?: number; gr
     id: chat.type === 'private' ? chat.userId! : chat.groupId!,
     name: chat.name,
   };
+  
+  // 清除该对话的未读消息数
+  const chatId = chat.type === 'private' ? `private_${chat.userId}` : `group_${chat.groupId}`;
+  clearUnreadCount(chatId);
 };
 
 // 选择联系人
@@ -246,10 +251,21 @@ const handleSelectContact = (contact: { userId: number; nickname: string }) => {
     id: contact.userId,
     name: contact.nickname,
   };
+  
+  // 清除该对话的未读消息数
+  clearUnreadCount(`private_${contact.userId}`);
 };
 
 // 选择群组
 const handleSelectGroup = (group: { groupId: number; groupName: string }) => {
+  currentChat.value = {
+    type: 'group',
+    id: group.groupId,
+    name: group.groupName,
+  };
+  
+  // 清除该对话的未读消息数
+  clearUnreadCount(`group_${group.groupId}`);
   currentChat.value = {
     type: 'group',
     id: group.groupId,
@@ -270,6 +286,9 @@ onMounted(async () => {
   
   // 初始化全局对话列表管理
   initChatsStore();
+  
+  // 初始化通知权限
+  initNotificationPermission();
 
   // 同步全局 self_id 到本地 ref（用于向后兼容）
   const connectionState = getConnectionState();
@@ -517,6 +536,22 @@ onMounted(async () => {
     
     // 更新全局对话列表
     updateChatFromMessage(message, selfId.value || undefined);
+    
+    // 发送通知（仅针对接收的消息，不是自己发送的）
+    if (message.post_type === 'message' && message.message_type && message.self_id === selfId.value) {
+      let chatName = '新消息';
+      if (message.message_type === 'private' && message.user_id) {
+        chatName = getContactName(message.user_id);
+      } else if (message.message_type === 'group' && message.group_id) {
+        chatName = getGroupName(message.group_id);
+      }
+      const preview = (message.raw_message || message.message || '').replace(/\[CQ:[^\]]+\]/g, '').replace(/\s+/g, ' ').trim();
+      if (preview) {
+        notifyChatMessage(chatName, preview);
+      } else {
+        notifyChatMessage(chatName, '[新消息]');
+      }
+    }
   });
 
   onBeforeUnmount(() => {

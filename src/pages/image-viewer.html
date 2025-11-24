@@ -50,7 +50,7 @@
       -webkit-user-select: none;
       -moz-user-select: none;
       -ms-user-select: none;
-      transition: transform 0.1s ease-out;
+      will-change: transform;
       -webkit-user-drag: none !important;
       -khtml-user-drag: none !important;
       -moz-user-drag: none !important;
@@ -213,8 +213,14 @@
     let clickCount = 0;
 
     // 更新图片变换
-    function updateTransform() {
-      image.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+    function updateTransform(smooth = false) {
+      // 使用 translate3d 触发 GPU 加速
+      if (smooth) {
+        image.style.transition = 'transform 0.3s ease-out';
+      } else {
+        image.style.transition = 'none';
+      }
+      image.style.transform = `translate3d(${translateX}px, ${translateY}px, 0) scale(${scale})`;
       zoomInfo.textContent = `${Math.round(scale * 100)}%`;
       zoomInfo.classList.add('show');
       setTimeout(() => {
@@ -259,15 +265,25 @@
       translateY = 0;
       currentTranslateX = 0;
       currentTranslateY = 0;
-      updateTransform();
+      pendingTranslateX = 0;
+      pendingTranslateY = 0;
+      updateTransform(true); // 使用平滑过渡
     });
 
     // 关闭窗口
     closeBtn.addEventListener('click', async (e) => {
       e.preventDefault();
       e.stopPropagation();
-      const window = getCurrentWindow();
-      await window.close();
+      e.stopImmediatePropagation();
+      // 重置双击检测
+      clickCount = 0;
+      lastClickTime = 0;
+      try {
+        const window = getCurrentWindow();
+        await window.close();
+      } catch (error) {
+        console.error('关闭窗口失败:', error);
+      }
     });
 
     // 鼠标滚轮缩放
@@ -288,6 +304,18 @@
       updateTransform();
     });
 
+    // 使用 requestAnimationFrame 优化拖动性能
+    let animationFrameId = null;
+    let pendingTranslateX = 0;
+    let pendingTranslateY = 0;
+    
+    function applyTransform() {
+      translateX = pendingTranslateX;
+      translateY = pendingTranslateY;
+      updateTransform();
+      animationFrameId = null;
+    }
+
     // 鼠标拖拽（用于移动图片）
     imageContainer.addEventListener('mousedown', (e) => {
       // 如果点击的是控制按钮，不处理
@@ -296,7 +324,7 @@
       }
       
       // 允许拖动图片（无论是否缩放）
-      if (e.target === image) {
+      if (e.target === image || e.target === imageContainer) {
         e.preventDefault();
         e.stopPropagation();
         // 阻止默认的拖拽行为
@@ -313,9 +341,13 @@
         e.stopPropagation();
         currentTranslateX = e.clientX - startX;
         currentTranslateY = e.clientY - startY;
-        translateX = currentTranslateX;
-        translateY = currentTranslateY;
-        updateTransform();
+        pendingTranslateX = currentTranslateX;
+        pendingTranslateY = currentTranslateY;
+        
+        // 使用 requestAnimationFrame 优化性能
+        if (!animationFrameId) {
+          animationFrameId = requestAnimationFrame(applyTransform);
+        }
       }
     }, { passive: false });
 
@@ -323,6 +355,11 @@
       if (isDragging) {
         e.preventDefault();
         e.stopPropagation();
+        // 取消未执行的动画帧
+        if (animationFrameId) {
+          cancelAnimationFrame(animationFrameId);
+          animationFrameId = null;
+        }
       }
       isDragging = false;
       body.classList.remove('dragging');
@@ -332,6 +369,11 @@
       if (isDragging) {
         e.preventDefault();
         e.stopPropagation();
+        // 取消未执行的动画帧
+        if (animationFrameId) {
+          cancelAnimationFrame(animationFrameId);
+          animationFrameId = null;
+        }
       }
       isDragging = false;
       body.classList.remove('dragging');
@@ -374,7 +416,9 @@
           translateY = 0;
           currentTranslateX = 0;
           currentTranslateY = 0;
-          updateTransform();
+          pendingTranslateX = 0;
+          pendingTranslateY = 0;
+          updateTransform(true); // 使用平滑过渡
           clickCount = 0;
           lastClickTime = 0;
         }

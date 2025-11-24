@@ -180,6 +180,9 @@ export function updateChatFromMessage(message: OneBotMessage, selfId?: number): 
   let chatId: string;
   let chatName: string;
   let chatType: 'private' | 'group';
+  
+  // 跳过自己发送的消息（message_sent），不增加未读数
+  const isSentByMe = message.post_type === 'message_sent';
 
   if (message.message_type === 'private' && message.user_id) {
     chatId = `private_${message.user_id}`;
@@ -230,6 +233,11 @@ export function updateChatFromMessage(message: OneBotMessage, selfId?: number): 
     chat.lastTime = message.time;
     chat.lastMessage = formatMessagePreview(rawMessage);
   }
+  
+  // 如果不是自己发送的消息，增加未读数
+  if (!isSentByMe) {
+    chat.unreadCount = (chat.unreadCount || 0) + 1;
+  }
 
   // 重新排序（将更新的对话移到最前面）
   state.chats.sort((a, b) => {
@@ -278,6 +286,16 @@ export function useChatsState() {
  */
 export function getChatsState() {
   return state;
+}
+
+/**
+ * 清除指定对话的未读消息数
+ */
+export function clearUnreadCount(chatId: string): void {
+  const chat = state.chats.find(c => c.id === chatId);
+  if (chat) {
+    chat.unreadCount = 0;
+  }
 }
 
 /**

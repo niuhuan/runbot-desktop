@@ -314,7 +314,20 @@ const selectFace = (faceId: string) => {
   const editor = inputEditorRef.value;
   const selection = window.getSelection();
   
+  // 检查当前选区是否在编辑器内
+  let isSelectionInEditor = false;
   if (selection && selection.rangeCount > 0) {
+    const range = selection.getRangeAt(0);
+    let container = range.commonAncestorContainer;
+    // 如果是文本节点，获取其父元素
+    if (container.nodeType === Node.TEXT_NODE) {
+      container = container.parentNode as Node;
+    }
+    // 检查是否是编辑器或编辑器的子节点
+    isSelectionInEditor = container === editor || editor.contains(container);
+  }
+  
+  if (selection && selection.rangeCount > 0 && isSelectionInEditor) {
     const range = selection.getRangeAt(0);
     range.deleteContents();
     
@@ -609,11 +622,6 @@ const openImageViewer = async (imageUrl: string) => {
     });
     
     console.log('图片查看器窗口已创建');
-    
-    // 监听窗口关闭事件
-    imageViewerWindow.once('tauri://close-requested', () => {
-      console.log('图片查看器窗口已关闭');
-    });
   } catch (error) {
     console.error('打开图片查看器失败:', error);
     // 如果创建窗口失败，使用浏览器方式打开
