@@ -1166,8 +1166,16 @@ onUnmounted(() => {
 
 // 显示右键菜单
 const showMessageContextMenu = (event: MouseEvent, msg: OneBotMessage) => {
+  console.log('[ChatArea] 右键点击消息:', msg);
+  
   // 只有自己发送的消息且未被撤回才能撤回
-  if (msg.post_type !== 'message_sent' || msg.recalled) {
+  if (msg.post_type !== 'message_sent') {
+    console.log('[ChatArea] 不是自己发送的消息，不显示撤回选项');
+    return;
+  }
+  
+  if (msg.recalled) {
+    console.log('[ChatArea] 消息已被撤回');
     return;
   }
   
@@ -1176,15 +1184,38 @@ const showMessageContextMenu = (event: MouseEvent, msg: OneBotMessage) => {
   const messageTime = msg.time;
   const timeDiff = now - messageTime;
   
+  console.log('[ChatArea] 消息时间检查:', { now, messageTime, timeDiff, limit: 120 });
+  
   if (timeDiff > 120) {
     console.warn('[ChatArea] 消息超过2分钟，无法撤回');
     return;
   }
   
   event.preventDefault();
+  console.log('[ChatArea] 显示右键菜单');
   contextMenuMessage.value = msg;
-  contextMenuX.value = event.clientX;
-  contextMenuY.value = event.clientY;
+  
+  // 计算菜单位置，确保不超出视窗
+  const menuWidth = 120; // 菜单宽度
+  const menuHeight = 40; // 菜单高度
+  const windowWidth = window.innerWidth;
+  const windowHeight = window.innerHeight;
+  
+  let x = event.clientX;
+  let y = event.clientY;
+  
+  // 如果右侧超出，调整到左侧
+  if (x + menuWidth > windowWidth) {
+    x = windowWidth - menuWidth - 10;
+  }
+  
+  // 如果底部超出，调整到上方
+  if (y + menuHeight > windowHeight) {
+    y = windowHeight - menuHeight - 10;
+  }
+  
+  contextMenuX.value = x;
+  contextMenuY.value = y;
   showContextMenu.value = true;
 };
 
