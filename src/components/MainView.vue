@@ -996,8 +996,8 @@ watch(() => selfId.value, (newSelfId) => {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #f5f5f5;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #f4f4f5;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
 }
 
 .content-area {
@@ -1006,45 +1006,46 @@ watch(() => selfId.value, (newSelfId) => {
   overflow: hidden;
 }
 
-/* 左侧第一列：垂直导航栏 */
+/* 左侧第一列：垂直导航栏 - Telegram 深色风格 */
 .nav-sidebar {
-  width: 60px;
+  width: 64px;
   display: flex;
   flex-direction: column;
-  background: #f5f5f5;
-  border-right: 1px solid #e0e0e0;
+  background: linear-gradient(180deg, #17212b 0%, #0f1419 100%);
+  border-right: none;
   flex-shrink: 0;
-  padding: 8px 0;
+  padding: 12px 0;
   align-items: center;
   height: 100%;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.08);
 }
 
 .nav-avatar {
   width: 100%;
   display: flex;
   justify-content: center;
-  padding: 8px 0 12px 0;
-  margin-bottom: 8px;
-  border-bottom: 1px solid #e0e0e0;
+  padding: 8px 0 16px 0;
+  margin-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .avatar-circle {
-  width: 40px;
-  height: 40px;
+  width: 42px;
+  height: 42px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #07c160 0%, #06ad56 100%);
+  background: linear-gradient(135deg, #0088cc 0%, #006ba6 100%);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(0, 136, 204, 0.3);
   position: relative;
 }
 
 .avatar-circle:hover {
-  transform: scale(1.05);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  transform: scale(1.08);
+  box-shadow: 0 4px 12px rgba(0, 136, 204, 0.4);
 }
 
 .avatar-text {
@@ -1088,23 +1089,36 @@ watch(() => selfId.value, (newSelfId) => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 12px 8px;
+  padding: 14px 8px;
   cursor: pointer;
   transition: all 0.2s;
-  color: #666;
-  border-left: 3px solid transparent;
-  margin-bottom: 4px;
+  color: rgba(255, 255, 255, 0.6);
+  background: transparent;
+  border-radius: 12px;
+  margin: 4px 8px;
+  position: relative;
 }
 
 .nav-item:hover {
-  background: #e8e8e8;
-  color: #333;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
 }
 
 .nav-item.active {
-  background: #e8e8e8;
-  color: #07c160;
-  border-left-color: #07c160;
+  background: rgba(0, 136, 204, 0.15);
+  color: #0088cc;
+}
+
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 24px;
+  background: #0088cc;
+  border-radius: 0 2px 2px 0;
 }
 
 .nav-icon {
@@ -1123,26 +1137,28 @@ watch(() => selfId.value, (newSelfId) => {
 
 .nav-badge {
   position: absolute;
-  top: -4px;
-  right: -8px;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  background: #f44336;
+  top: -2px;
+  right: -6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: #ff3b30;
   color: white;
-  font-size: 10px;
-  font-weight: bold;
-  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 2px solid #f5f5f5;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  border: 2px solid #17212b;
+  box-shadow: 0 2px 6px rgba(255, 59, 48, 0.4);
 }
 
 .nav-label {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 500;
+  margin-top: 4px;
+  opacity: 0.9;
 }
 
 /* 底部状态和操作区域 */
@@ -1152,8 +1168,8 @@ watch(() => selfId.value, (newSelfId) => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding-top: 8px;
-  border-top: 1px solid #e0e0e0;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .connection-status {
@@ -1161,60 +1177,63 @@ watch(() => selfId.value, (newSelfId) => {
   display: flex;
   justify-content: center;
   padding: 8px 0;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 .status-block {
-  width: 24px;
-  height: 8px;
-  border-radius: 4px;
+  width: 28px;
+  height: 4px;
+  border-radius: 2px;
   transition: background-color 0.3s;
   cursor: pointer;
 }
 
 .menu-item.active {
-  background: #e8e8e8;
-  color: #07c160;
+  background: rgba(255, 255, 255, 0.08);
+  color: #0088cc;
 }
 
-/* 弹出菜单 */
+/* 弹出菜单 - Telegram 风格 */
 .context-menu {
   position: fixed;
   background: white;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  min-width: 160px;
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  min-width: 180px;
   z-index: 1000;
-  padding: 4px 0;
-  border: 1px solid #e0e0e0;
+  padding: 8px 0;
+  border: none;
 }
 
 .menu-item-text {
-  padding: 10px 16px;
+  padding: 12px 16px;
   cursor: pointer;
   font-size: 14px;
-  color: #333;
-  transition: background-color 0.2s;
+  color: #222;
+  transition: background-color 0.15s;
   user-select: none;
 }
 
 .menu-item-text:hover {
-  background-color: #f5f5f5;
+  background: #f4f4f5;
+}
+
+.menu-item-text:active {
+  background: #e8e8e9;
 }
 
 .menu-item-danger {
-  color: #f44336;
+  color: #ff3b30;
 }
 
 .menu-item-danger:hover {
-  background-color: #ffebee;
-  color: #d32f2f;
+  background: #fff0f0;
 }
 
 .menu-divider {
   height: 1px;
-  background-color: #e0e0e0;
-  margin: 4px 0;
+  background: #e8e8e9;
+  margin: 6px 0;
 }
 
 .menu-item-with-submenu {
@@ -1224,20 +1243,21 @@ watch(() => selfId.value, (newSelfId) => {
 }
 
 .submenu-arrow {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   margin-left: 8px;
   flex-shrink: 0;
+  opacity: 0.6;
 }
 
 .submenu {
-  min-width: 140px;
+  min-width: 160px;
 }
 
 .status-option {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .status-option.active {
@@ -1262,14 +1282,15 @@ watch(() => selfId.value, (newSelfId) => {
   background: transparent;
 }
 
-/* 左侧第二列：列表内容 */
+/* 左侧第二列：列表内容 - Telegram 风格 */
 .left-panel {
-  width: 280px;
+  width: 320px;
   display: flex;
   flex-direction: column;
   background: white;
-  border-right: 1px solid #e0e0e0;
+  border-right: none;
   flex-shrink: 0;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.04);
 }
 
 .panel-content {
@@ -1282,5 +1303,6 @@ watch(() => selfId.value, (newSelfId) => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: #f4f4f5;
 }
 </style>

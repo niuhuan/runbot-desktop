@@ -174,19 +174,43 @@ export default {
 
 .chat-item {
   display: flex;
-  padding: 12px 16px;
+  padding: 12px 12px;
   cursor: pointer;
-  transition: background-color 0.2s;
-  border-bottom: 1px solid #f0f0f0;
+  transition: background-color 0.15s;
+  border-bottom: none;
+  position: relative;
+}
+
+.chat-item::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 76px;
+  right: 12px;
+  height: 1px;
+  background: #f0f0f0;
+}
+
+.chat-item:last-child::after {
+  display: none;
 }
 
 .chat-item:hover {
-  background-color: #f5f5f5;
+  background-color: #f4f4f5;
 }
 
 .chat-item.active {
-  background-color: #e3f2fd;
-  border-left: 3px solid #2196f3;
+  background-color: #e7f2ff;
+}
+
+.chat-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: #0088cc;
 }
 
 .chat-avatar {
@@ -195,21 +219,21 @@ export default {
 }
 
 .avatar-placeholder {
-  width: 48px;
-  height: 48px;
+  width: 52px;
+  height: 52px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #0088cc 0%, #006ba6 100%);
   color: white;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 20px;
+  font-weight: 500;
 }
 
 .avatar-image {
-  width: 48px;
-  height: 48px;
+  width: 52px;
+  height: 52px;
   border-radius: 50%;
   object-fit: cover;
   background: #f0f0f0;
@@ -233,7 +257,7 @@ export default {
 .chat-name {
   font-size: 15px;
   font-weight: 500;
-  color: #333;
+  color: #222;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -241,7 +265,7 @@ export default {
 
 .chat-time {
   font-size: 12px;
-  color: #999;
+  color: #8e8e93;
   flex-shrink: 0;
   margin-left: 8px;
 }
@@ -253,8 +277,8 @@ export default {
 }
 
 .preview-text {
-  font-size: 13px;
-  color: #666;
+  font-size: 14px;
+  color: #8e8e93;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -262,22 +286,25 @@ export default {
 }
 
 .unread-badge {
-  background-color: #f44336;
+  background: #0088cc;
   color: white;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  padding: 2px 6px;
+  min-width: 20px;
+  height: 20px;
   border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
   margin-left: 8px;
   flex-shrink: 0;
-  min-width: 18px;
-  text-align: center;
 }
 
 .empty-state {
-  padding: 40px 20px;
+  padding: 60px 20px;
   text-align: center;
-  color: #999;
+  color: #8e8e93;
   font-size: 14px;
 }
 </style>

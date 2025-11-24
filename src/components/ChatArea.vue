@@ -1573,14 +1573,13 @@ defineExpose({
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: #f5f5f5;
+  background: #f4f4f5;
 }
 
 .chat-header {
   padding: 12px 20px;
   background: white;
-  border-bottom: 1px solid #e0e0e0;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  border-bottom: 1px solid #e8e8e8;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1595,18 +1594,18 @@ defineExpose({
 
 .debug-button {
   padding: 6px 12px;
-  background: #ff9800;
+  background: #0088cc;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 8px;
   cursor: pointer;
   font-size: 12px;
   font-weight: 500;
-  transition: background 0.2s;
+  transition: background 0.15s;
 }
 
 .debug-button:hover {
-  background: #f57c00;
+  background: #006699;
 }
 
 .debug-panel {
@@ -1625,12 +1624,12 @@ defineExpose({
 
 .debug-panel-header {
   padding: 12px 16px;
-  background: #ff9800;
+  background: #0088cc;
   color: white;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 1px solid #e8e8e8;
 }
 
 .debug-panel-header h3 {
@@ -1667,20 +1666,21 @@ defineExpose({
 .debug-info {
   margin-bottom: 16px;
   padding: 12px;
-  background: #f5f5f5;
-  border-radius: 4px;
+  background: #f4f4f5;
+  border-radius: 8px;
 }
 
 .debug-info p {
   margin: 4px 0;
   font-size: 14px;
+  color: #222;
 }
 
 .debug-messages h4 {
   margin: 0 0 12px 0;
   font-size: 14px;
   font-weight: 600;
-  color: #333;
+  color: #222;
 }
 
 .debug-message-list {
@@ -1690,16 +1690,16 @@ defineExpose({
 }
 
 .debug-message-item {
-  border: 1px solid #e0e0e0;
-  border-radius: 4px;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
   overflow: hidden;
   background: #fafafa;
 }
 
 .debug-message-header {
   padding: 8px 12px;
-  background: #e3f2fd;
-  border-bottom: 1px solid #e0e0e0;
+  background: #e7f2ff;
+  border-bottom: 1px solid #e8e8e8;
   display: flex;
   gap: 8px;
   align-items: center;
@@ -1709,14 +1709,14 @@ defineExpose({
 
 .debug-message-index {
   font-weight: 600;
-  color: #1976d2;
+  color: #0088cc;
 }
 
 .debug-message-type {
   padding: 2px 6px;
-  background: #2196f3;
+  background: #0088cc;
   color: white;
-  border-radius: 3px;
+  border-radius: 4px;
   font-size: 11px;
 }
 
@@ -1747,30 +1747,31 @@ defineExpose({
 }
 
 .chat-avatar .avatar-image {
-  width: 40px;
-  height: 40px;
+  width: 42px;
+  height: 42px;
   border-radius: 50%;
   object-fit: cover;
-  background: #f0f0f0;
+  background: #f4f4f5;
 }
 
 .chat-avatar .avatar-placeholder {
-  width: 40px;
-  height: 40px;
+  width: 42px;
+  height: 42px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #0088cc 0%, #006699 100%);
   color: white;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 18px;
   font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .chat-name {
   font-size: 16px;
   font-weight: 600;
-  color: #333;
+  color: #222;
 }
 
 .messages-container {
@@ -1788,7 +1789,7 @@ defineExpose({
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: #999;
+  color: #8e8e93;
 }
 
 .empty-state p {
@@ -1796,7 +1797,7 @@ defineExpose({
 }
 
 .hint {
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .message-item {
@@ -1807,9 +1808,10 @@ defineExpose({
 
 .message-time {
   text-align: center;
-  font-size: 11px;
-  color: #999;
-  margin: 8px 0;
+  font-size: 12px;
+  color: #8e8e93;
+  margin: 12px 0;
+  font-weight: 500;
 }
 
 .message-content {
@@ -1867,9 +1869,9 @@ defineExpose({
 
 /* 发送人名称（在第一条消息上方） */
 .message-sender {
-  font-size: 12px;
-  color: #666;
-  margin-bottom: 2px;
+  font-size: 13px;
+  color: #8e8e93;
+  margin-bottom: 4px;
   font-weight: 500;
   padding: 0 2px;
 }
@@ -1878,15 +1880,15 @@ defineExpose({
   background: white;
   padding: 10px 14px;
   border-radius: 12px;
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 15px;
+  line-height: 1.4;
   word-wrap: break-word;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
 /* 发送的消息（无论私聊还是群组）：蓝色背景 */
 .message-item.message-sent .message-text {
-  background: #2196f3;
+  background: #0088cc;
   color: white;
 }
 
@@ -1894,7 +1896,7 @@ defineExpose({
 .message-item.private:not(.message-sent) .message-text,
 .message-item.group:not(.message-sent) .message-text {
   background: white;
-  color: #333;
+  color: #222;
 }
 
 /* 单个图片：透明背景，圆角 */
@@ -1925,20 +1927,20 @@ defineExpose({
 
 /* 撤回的消息样式 */
 .message-text.message-recalled {
-  background: #f5f5f5 !important;
-  color: #999 !important;
+  background: #f4f4f5 !important;
+  color: #8e8e93 !important;
   opacity: 0.7;
   font-style: italic;
 }
 
 .message-item.message-sent .message-text.message-recalled {
-  background: #e3f2fd !important;
-  color: #999 !important;
+  background: #e7f2ff !important;
+  color: #8e8e93 !important;
 }
 
 .recalled-notice {
-  font-size: 12px;
-  color: #999;
+  font-size: 13px;
+  color: #8e8e93;
   margin-bottom: 4px;
 }
 
@@ -1946,24 +1948,24 @@ defineExpose({
 .context-menu {
   position: fixed;
   background: white;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  border: 1px solid #e8e8e8;
+  border-radius: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   z-index: 1000;
   min-width: 120px;
   overflow: hidden;
 }
 
 .context-menu-item {
-  padding: 10px 16px;
+  padding: 12px 16px;
   cursor: pointer;
   font-size: 14px;
-  color: #333;
-  transition: background 0.2s;
+  color: #222;
+  transition: background 0.15s;
 }
 
 .context-menu-item:hover {
-  background: #f5f5f5;
+  background: #f4f4f5;
 }
 
 .context-menu-overlay {
@@ -2001,11 +2003,11 @@ defineExpose({
 .image-placeholder {
   display: inline-block;
   padding: 20px 40px;
-  background: rgba(0, 0, 0, 0.05);
-  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 12px;
   margin: 4px 0;
-  color: #999;
-  font-size: 12px;
+  color: #8e8e93;
+  font-size: 13px;
 }
 
 .image-loading {
@@ -2015,12 +2017,12 @@ defineExpose({
 .image-error {
   display: inline-block;
   padding: 20px 40px;
-  background: rgba(244, 67, 54, 0.1);
-  border: 1px solid rgba(244, 67, 54, 0.3);
-  border-radius: 8px;
+  background: rgba(255, 59, 48, 0.1);
+  border: 1px solid rgba(255, 59, 48, 0.3);
+  border-radius: 12px;
   margin: 4px 0;
-  color: #f44336;
-  font-size: 12px;
+  color: #ff3b30;
+  font-size: 13px;
 }
 
 .image-error span {
@@ -2029,61 +2031,62 @@ defineExpose({
 
 .cq-face,
 .cq-at {
-  color: #2196f3;
+  color: #0088cc;
   font-weight: 500;
 }
 
 .cq-face-image {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   vertical-align: middle;
   display: inline-block;
   object-fit: contain;
 }
 
 .cq-at {
-  background: rgba(33, 150, 243, 0.1);
-  padding: 2px 6px;
-  border-radius: 4px;
+  background: rgba(0, 136, 204, 0.1);
+  padding: 3px 8px;
+  border-radius: 6px;
 }
 
 .input-area {
   padding: 16px;
   background: white;
-  border-top: 1px solid #e0e0e0;
+  border-top: 1px solid #e8e8e8;
 }
 
 /* 富文本编辑器样式 */
 .rich-input-editor {
   flex: 1;
-  padding: 10px 14px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  font-size: 14px;
+  padding: 12px 14px;
+  border: 1px solid #e8e8e8;
+  border-radius: 12px;
+  font-size: 15px;
   font-family: inherit;
-  line-height: 1.5;
-  min-height: 44px;
+  line-height: 1.4;
+  min-height: 48px;
   max-height: 120px;
   overflow-y: auto;
   word-wrap: break-word;
   white-space: pre-wrap;
   background: white;
   outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .rich-input-editor:focus {
-  border-color: #2196f3;
-  box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.1);
+  border-color: #0088cc;
+  box-shadow: 0 0 0 3px rgba(0, 136, 204, 0.1);
 }
 
 .rich-input-editor:empty:before {
   content: attr(data-placeholder);
-  color: #999;
+  color: #8e8e93;
   pointer-events: none;
 }
 
 .rich-input-editor.disabled {
-  background: #f5f5f5;
+  background: #f4f4f5;
   cursor: not-allowed;
   opacity: 0.6;
   pointer-events: none;
@@ -2093,8 +2096,8 @@ defineExpose({
 .input-face-emoji {
   vertical-align: middle;
   display: inline-block;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   margin: 0 2px;
   object-fit: contain;
 }
@@ -2104,7 +2107,7 @@ defineExpose({
   gap: 8px;
   padding: 8px 16px;
   overflow-x: auto;
-  border-bottom: 1px solid #e0e0e0;
+  border-bottom: 1px solid #e8e8e8;
 }
 
 .selected-image-item {
@@ -2116,8 +2119,8 @@ defineExpose({
   width: 80px;
   height: 80px;
   object-fit: cover;
-  border-radius: 8px;
-  border: 1px solid #ddd;
+  border-radius: 12px;
+  border: 1px solid #e8e8e8;
 }
 
 .remove-image-button {
@@ -2127,7 +2130,7 @@ defineExpose({
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: #f44336;
+  background: #ff3b30;
   color: white;
   border: none;
   cursor: pointer;
@@ -2136,7 +2139,8 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  transition: background 0.15s;
 }
 
 .remove-image-button:hover {
@@ -2159,13 +2163,13 @@ defineExpose({
 
 .face-button,
 .image-button {
-  padding: 10px 14px;
-  background-color: #f5f5f5;
-  color: #666;
-  border: 1px solid #ddd;
-  border-radius: 8px;
+  padding: 12px;
+  background-color: #f4f4f5;
+  color: #8e8e93;
+  border: 1px solid #e8e8e8;
+  border-radius: 12px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.15s;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2179,14 +2183,14 @@ defineExpose({
 
 .face-button:hover:not(:disabled),
 .image-button:hover:not(:disabled) {
-  background-color: #e0e0e0;
-  color: #333;
+  background-color: #e8e8e8;
+  color: #222;
 }
 
 .face-button.active {
-  background-color: #2196f3;
+  background-color: #0088cc;
   color: white;
-  border-color: #2196f3;
+  border-color: #0088cc;
 }
 
 .face-button:disabled,
@@ -2202,9 +2206,9 @@ defineExpose({
   left: 0;
   margin-bottom: 8px;
   background: white;
-  border: 1px solid #ddd;
-  border-radius: 12px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border: 1px solid #e8e8e8;
+  border-radius: 16px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   padding: 16px;
   width: 450px;
   max-height: 500px;
@@ -2226,13 +2230,13 @@ defineExpose({
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  border-radius: 6px;
-  transition: background-color 0.2s;
+  border-radius: 8px;
+  transition: background-color 0.15s;
   overflow: hidden;
 }
 
 .face-item:hover {
-  background-color: #f0f0f0;
+  background-color: #f4f4f5;
 }
 
 .face-image {
@@ -2242,9 +2246,9 @@ defineExpose({
 }
 
 .face-name {
-  font-size: 10px;
+  font-size: 11px;
   text-align: center;
-  color: #666;
+  color: #8e8e93;
   padding: 2px;
 }
 
@@ -2253,10 +2257,10 @@ defineExpose({
 .input-placeholder {
   padding: 40px;
   text-align: center;
-  color: #999;
-  font-size: 14px;
+  color: #8e8e93;
+  font-size: 15px;
   background: white;
-  border-top: 1px solid #e0e0e0;
+  border-top: 1px solid #e8e8e8;
 }
 </style>
 

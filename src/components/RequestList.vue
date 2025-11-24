@@ -263,14 +263,14 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px;
-  border-bottom: 1px solid #e0e0e0;
+  padding: 12px 12px 8px 12px;
+  border-bottom: none;
   background: white;
 }
 
 .tabs {
   display: flex;
-  gap: 8px;
+  gap: 4px;
 }
 
 .tab {
@@ -278,30 +278,32 @@ defineExpose({
   padding: 8px 16px;
   border: none;
   background: transparent;
-  color: #666;
+  color: #8e8e93;
   font-size: 14px;
+  font-weight: 500;
   cursor: pointer;
-  border-radius: 4px;
-  transition: all 0.2s;
+  border-radius: 8px;
+  transition: all 0.15s;
 }
 
 .tab:hover {
-  background: #f5f5f5;
+  background: #f4f4f5;
+  color: #222;
 }
 
 .tab.active {
-  color: #2196f3;
-  background: #e3f2fd;
-  font-weight: 500;
+  color: #0088cc;
+  background: #e7f2ff;
 }
 
 .badge {
   display: inline-block;
   margin-left: 6px;
   padding: 2px 6px;
-  background: #f44336;
+  background: #ff3b30;
   color: white;
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 600;
   border-radius: 10px;
   min-width: 18px;
   text-align: center;
@@ -309,24 +311,24 @@ defineExpose({
 
 .clear-btn {
   padding: 6px 12px;
-  border: 1px solid #ddd;
-  background: white;
-  color: #666;
+  border: none;
+  background: transparent;
+  color: #0088cc;
   font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
-  border-radius: 4px;
-  transition: all 0.2s;
+  border-radius: 6px;
+  transition: all 0.15s;
 }
 
 .clear-btn:hover {
-  background: #f5f5f5;
-  color: #333;
+  background: #f4f4f5;
 }
 
 .list-content {
   flex: 1;
   overflow-y: auto;
-  padding: 8px;
+  padding: 8px 8px;
 }
 
 .empty-state {
@@ -335,14 +337,15 @@ defineExpose({
   align-items: center;
   justify-content: center;
   height: 100%;
-  color: #999;
+  color: #8e8e93;
 }
 
 .empty-icon {
-  width: 64px;
-  height: 64px;
+  width: 72px;
+  height: 72px;
   margin-bottom: 16px;
-  opacity: 0.5;
+  opacity: 0.4;
+  color: #8e8e93;
 }
 
 .empty-text {
@@ -352,35 +355,73 @@ defineExpose({
 .request-item {
   display: flex;
   gap: 12px;
-  padding: 16px;
-  margin-bottom: 8px;
+  padding: 12px;
+  margin-bottom: 1px;
   background: white;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  transition: all 0.2s;
+  border: none;
+  border-radius: 0;
+  transition: all 0.15s;
+  position: relative;
+}
+
+.request-item::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 72px;
+  right: 12px;
+  height: 1px;
+  background: #f0f0f0;
+}
+
+.request-item:last-child::after {
+  display: none;
 }
 
 .request-item:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  background: #f4f4f5;
 }
 
-.request-item.pending {
-  border-left: 3px solid #ff9800;
+.request-item.pending::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: #ffa726;
 }
 
 .request-item.approved {
-  opacity: 0.7;
-  border-left: 3px solid #4caf50;
+  opacity: 0.6;
+}
+
+.request-item.approved::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: #34c759;
 }
 
 .request-item.rejected {
-  opacity: 0.7;
-  border-left: 3px solid #f44336;
+  opacity: 0.6;
+}
+
+.request-item.rejected::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: #ff3b30;
 }
 
 .request-item.unread {
-  background: #fafafa;
-  box-shadow: 0 0 0 2px #2196f3 inset;
+  background: #e7f2ff;
 }
 
 .request-avatar {
@@ -389,18 +430,18 @@ defineExpose({
 }
 
 .avatar-image {
-  width: 48px;
-  height: 48px;
+  width: 52px;
+  height: 52px;
   border-radius: 50%;
   object-fit: cover;
   background: #f0f0f0;
 }
 
 .avatar-placeholder {
-  width: 48px;
-  height: 48px;
+  width: 52px;
+  height: 52px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #0088cc 0%, #006ba6 100%);
   color: white;
   display: flex;
   align-items: center;
@@ -410,11 +451,11 @@ defineExpose({
 
 .unread-indicator {
   position: absolute;
-  top: 0;
-  right: 0;
-  width: 12px;
-  height: 12px;
-  background: #f44336;
+  top: 2px;
+  right: 2px;
+  width: 10px;
+  height: 10px;
+  background: #ff3b30;
   border: 2px solid white;
   border-radius: 50%;
 }
@@ -434,74 +475,83 @@ defineExpose({
 
 .request-type {
   font-size: 13px;
-  font-weight: 500;
-  color: #2196f3;
+  font-weight: 600;
+  color: #0088cc;
 }
 
 .request-time {
   font-size: 12px;
-  color: #999;
+  color: #8e8e93;
 }
 
 .request-description {
   font-size: 14px;
-  color: #333;
+  color: #222;
   line-height: 1.5;
 }
 
 .request-comment {
-  padding: 8px;
-  background: #f5f5f5;
-  border-radius: 4px;
+  padding: 10px 12px;
+  background: #f4f4f5;
+  border-radius: 8px;
   font-size: 13px;
   line-height: 1.5;
 }
 
 .comment-label {
-  color: #666;
+  color: #8e8e93;
   font-weight: 500;
 }
 
 .comment-text {
-  color: #333;
+  color: #222;
 }
 
 .request-actions {
   display: flex;
   gap: 8px;
-  margin-top: 4px;
+  margin-top: 8px;
 }
 
 .request-actions button {
   flex: 1;
-  padding: 8px 16px;
+  padding: 10px 16px;
   border: none;
-  border-radius: 4px;
-  font-size: 13px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.15s;
 }
 
 .btn-approve {
-  background: #4caf50;
+  background: #34c759;
   color: white;
 }
 
 .btn-approve:hover {
-  background: #45a049;
+  background: #2fb350;
+}
+
+.btn-approve:active {
+  background: #28a745;
 }
 
 .btn-reject {
-  background: #f44336;
+  background: #ff3b30;
   color: white;
 }
 
 .btn-reject:hover {
-  background: #da190b;
+  background: #e6342a;
+}
+
+.btn-reject:active {
+  background: #cc2e24;
 }
 
 .request-status {
-  margin-top: 4px;
+  margin-top: 8px;
   font-size: 13px;
   font-weight: 500;
 }
@@ -510,18 +560,18 @@ defineExpose({
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: #4caf50;
+  color: #34c759;
 }
 
 .status-rejected {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: #f44336;
+  color: #ff3b30;
 }
 
 .status-icon {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
 }
 </style>

@@ -195,7 +195,6 @@ defineExpose({
   flex-direction: column;
   height: 100%;
   background: white;
-  border-right: 1px solid #e0e0e0;
 }
 
 .list-content {
@@ -204,20 +203,43 @@ defineExpose({
 }
 
 .contact-item {
+  position: relative;
   display: flex;
   padding: 12px 16px;
   cursor: pointer;
-  transition: background-color 0.2s;
-  border-bottom: 1px solid #f0f0f0;
+  transition: background-color 0.15s;
+}
+
+.contact-item::after {
+  content: '';
+  position: absolute;
+  left: 76px;
+  right: 16px;
+  bottom: 0;
+  height: 1px;
+  background-color: #e8e8e8;
+}
+
+.contact-item:last-child::after {
+  display: none;
 }
 
 .contact-item:hover {
-  background-color: #f5f5f5;
+  background-color: #f4f4f5;
 }
 
 .contact-item.active {
-  background-color: #e3f2fd;
-  border-left: 3px solid #2196f3;
+  background-color: #e7f2ff;
+}
+
+.contact-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background-color: #0088cc;
 }
 
 .contact-avatar {
@@ -226,23 +248,24 @@ defineExpose({
 }
 
 .avatar-image {
-  width: 48px;
-  height: 48px;
+  width: 52px;
+  height: 52px;
   border-radius: 50%;
   object-fit: cover;
 }
 
 .avatar-placeholder {
-  width: 48px;
-  height: 48px;
+  width: 52px;
+  height: 52px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+  background: linear-gradient(135deg, #0088cc 0%, #006699 100%);
   color: white;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .contact-info {
@@ -250,41 +273,54 @@ defineExpose({
   display: flex;
   flex-direction: column;
   justify-content: center;
+  min-width: 0;
 }
 
 .contact-name {
   font-size: 15px;
   font-weight: 500;
-  color: #333;
-  margin-bottom: 2px;
+  color: #222;
+  margin-bottom: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .contact-nickname {
-  font-size: 12px;
-  color: #999;
+  font-size: 13px;
+  color: #8e8e93;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .loading-state,
 .empty-state {
   padding: 40px 20px;
   text-align: center;
-  color: #999;
+  color: #8e8e93;
   font-size: 14px;
 }
 
 .reload-btn {
   margin-top: 12px;
-  padding: 8px 16px;
-  background-color: #2196f3;
+  padding: 8px 20px;
+  background-color: #0088cc;
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: 8px;
   cursor: pointer;
   font-size: 14px;
+  font-weight: 500;
+  transition: background-color 0.15s;
 }
 
 .reload-btn:hover {
-  background-color: #1976d2;
+  background-color: #006699;
+}
+
+.reload-btn:active {
+  background-color: #005580;
 }
 </style>
 
