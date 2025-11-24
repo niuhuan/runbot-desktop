@@ -538,7 +538,8 @@ onMounted(async () => {
     updateChatFromMessage(message, selfId.value || undefined);
     
     // 发送通知（仅针对接收的消息，不是自己发送的）
-    if (message.post_type === 'message' && message.message_type && message.self_id === selfId.value) {
+    // 注意：需要排除自己发送的消息，只对别人发来的消息发送通知
+    if (message.post_type === 'message' && message.message_type && message.user_id !== selfId.value) {
       let chatName = '新消息';
       if (message.message_type === 'private' && message.user_id) {
         chatName = getContactName(message.user_id);
