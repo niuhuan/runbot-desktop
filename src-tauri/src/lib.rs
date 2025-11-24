@@ -273,6 +273,8 @@ pub fn run() {
             storage::delete_message,
             storage::cleanup_old_messages,
             storage::get_message_stats,
+            storage::mark_message_recalled,
+            storage::check_message_recalled,
             // 头像命令
             avatar::get_user_avatar,
             avatar::get_group_avatar,

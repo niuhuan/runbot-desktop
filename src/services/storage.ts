@@ -127,3 +127,56 @@ export async function getMessageStats(selfId?: number): Promise<{
   }
 }
 
+/**
+ * 标记消息为已撤回
+ */
+export async function markMessageRecalled(messageId: number, selfId?: number): Promise<void> {
+  try {
+    await invoke('mark_message_recalled', {
+      messageId,
+      selfId: selfId || null,
+    });
+  } catch (error) {
+    console.error('标记消息为已撤回失败:', error);
+    throw error;
+  }
+}
+
+/**
+ * 检查消息是否已撤回（调试用）
+ */
+export async function checkMessageRecalled(messageId: number, selfId?: number): Promise<any> {
+  try {
+    const result = await invoke('check_message_recalled', {
+      messageId,
+      selfId: selfId || null,
+    });
+    return result;
+  } catch (error) {
+    console.error('检查消息撤回状态失败:', error);
+    throw error;
+  }
+}
+
+/**
+ * 通过 message_id 获取消息
+ */
+export async function getMessageById(messageId: number, selfId?: number): Promise<OneBotMessage | null> {
+  try {
+    const result = await checkMessageRecalled(messageId, selfId);
+    if (result.error) {
+      return null;
+    }
+    // 从数据库查询完整的消息数据
+    const messages = await getMessages({
+      limit: 1,
+      selfId: selfId
+    });
+    // 找到匹配的消息
+    const message = messages.find(m => m.message_id === messageId);
+    return message || null;
+  } catch (error) {
+    console.error('获取消息失败:', error);
+    return null;
+  }
+}

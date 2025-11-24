@@ -28,6 +28,11 @@ export interface OneBotMessage {
   action?: string;
   // 消息发送状态
   sendStatus?: 'sending' | 'sent' | 'failed';
+  // 撤回状态
+  recalled?: boolean;
+  // 通知类型相关
+  notice_type?: string;  // 通知类型: group_recall, friend_recall等
+  operator_id?: number;  // 操作者ID（撤回消息的人）
 }
 
 class RunbotService {

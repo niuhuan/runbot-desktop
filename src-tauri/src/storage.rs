@@ -52,10 +52,26 @@ fn init_database(conn: &Connection) -> SqlResult<()> {
             content TEXT,
             raw_message TEXT,
             data TEXT NOT NULL,
+            recalled INTEGER DEFAULT 0,
             created_at INTEGER DEFAULT (strftime('%s', 'now'))
         )",
         [],
     )?;
+
+    // 为已存在的表添加 recalled 字段（如果还没有）
+    // SQLite 不支持 "IF NOT EXISTS" 在 ALTER TABLE 中，需要检查
+    let column_exists: bool = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name='recalled'",
+        [],
+        |row| row.get(0),
+    ).unwrap_or(0) > 0;
+    
+    if !column_exists {
+        conn.execute(
+            "ALTER TABLE messages ADD COLUMN recalled INTEGER DEFAULT 0",
+            [],
+        )?;
+    }
 
     // 创建全文搜索虚拟表（FTS5）
     // 注意：FTS5 需要 rowid，但我们使用 local_message_id 作为主键
@@ -397,7 +413,8 @@ pub async fn get_messages(
     let limit = limit.unwrap_or(100);
     let offset = offset.unwrap_or(0);
     
-    let mut query = "SELECT data FROM messages WHERE 1=1".to_string();
+    // 修改查询以同时获取 data 和 recalled 字段
+    let mut query = "SELECT data, recalled FROM messages WHERE 1=1".to_string();
     let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
     
     if let Some(pt) = &post_type {
@@ -431,7 +448,17 @@ pub async fn get_messages(
         rusqlite::params_from_iter(param_refs.iter().copied()),
         |row| -> SqlResult<String> {
             let data: String = row.get(0)?;
-            Ok(data)
+            let recalled: i64 = row.get(1)?;
+            
+            // 解析 JSON 并添加 recalled 字段
+            if let Ok(mut json_value) = serde_json::from_str::<Value>(&data) {
+                if let Some(obj) = json_value.as_object_mut() {
+                    obj.insert("recalled".to_string(), Value::Bool(recalled != 0));
+                }
+                Ok(serde_json::to_string(&json_value).unwrap_or(data))
+            } else {
+                Ok(data)
+            }
         },
     )
     .map_err(|e| format!("执行查询失败: {}", e))?;
@@ -457,9 +484,9 @@ pub async fn search_messages(
     let limit = limit.unwrap_or(100);
     let offset = offset.unwrap_or(0);
     
-    // 使用 FTS5 全文搜索
+    // 使用 FTS5 全文搜索，同时获取 recalled 字段
     let mut stmt = conn.prepare(
-        "SELECT m.data FROM messages m
+        "SELECT m.data, m.recalled FROM messages m
          JOIN messages_rowid_map rmap ON m.local_message_id = rmap.local_message_id
          JOIN messages_fts fts ON rmap.rowid = fts.rowid
          WHERE messages_fts MATCH ?1
@@ -472,7 +499,17 @@ pub async fn search_messages(
         params![query, limit as i32, offset as i32],
         |row| {
             let data: String = row.get(0)?;
-            Ok(data)
+            let recalled: i64 = row.get(1)?;
+            
+            // 解析 JSON 并添加 recalled 字段
+            if let Ok(mut json_value) = serde_json::from_str::<Value>(&data) {
+                if let Some(obj) = json_value.as_object_mut() {
+                    obj.insert("recalled".to_string(), Value::Bool(recalled != 0));
+                }
+                Ok(serde_json::to_string(&json_value).unwrap_or(data))
+            } else {
+                Ok(data)
+            }
         },
     )
     .map_err(|e| format!("执行搜索失败: {}", e))?;
@@ -611,3 +648,61 @@ pub async fn get_message_stats(
     }))
 }
 
+/// 标记消息为已撤回（通过 message_id）
+#[tauri::command]
+pub async fn mark_message_recalled(
+    message_id: i64,
+    self_id: Option<i64>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let conn = get_connection(&app, self_id)?;
+    
+    // 通过 message_id 标记消息为已撤回
+    let affected = conn.execute(
+        "UPDATE messages SET recalled = 1 WHERE message_id = ?1",
+        params![message_id],
+    )
+    .map_err(|e| format!("标记消息为已撤回失败: {}", e))?;
+    
+    if affected > 0 {
+        tracing::info!("已标记 message_id={} 的消息为已撤回", message_id);
+    } else {
+        tracing::warn!("未找到 message_id={} 的消息", message_id);
+    }
+    
+    Ok(())
+}
+
+/// 查询消息是否已撤回（调试用）
+#[tauri::command]
+pub async fn check_message_recalled(
+    message_id: i64,
+    self_id: Option<i64>,
+    app: AppHandle,
+) -> Result<serde_json::Value, String> {
+    let conn = get_connection(&app, self_id)?;
+    
+    let result = conn.query_row(
+        "SELECT message_id, recalled, raw_message, timestamp FROM messages WHERE message_id = ?1",
+        params![message_id],
+        |row| {
+            Ok(serde_json::json!({
+                "message_id": row.get::<_, i64>(0)?,
+                "recalled": row.get::<_, i64>(1)?,
+                "raw_message": row.get::<_, Option<String>>(2)?,
+                "timestamp": row.get::<_, i64>(3)?,
+            }))
+        },
+    );
+    
+    match result {
+        Ok(data) => Ok(data),
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            Ok(serde_json::json!({
+                "error": "未找到该消息",
+                "message_id": message_id
+            }))
+        }
+        Err(e) => Err(format!("查询消息失败: {}", e))
+    }
+}

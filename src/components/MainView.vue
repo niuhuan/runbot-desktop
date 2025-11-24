@@ -372,6 +372,16 @@ onMounted(async () => {
 
   // 监听消息
   messageUnlisten = await runbotService.onMessage(async (message) => {
+    // [调试] 打印所有收到的消息
+    console.log('[MainView] 收到原始消息:', {
+      post_type: message.post_type,
+      message_type: message.message_type,
+      sub_type: message.sub_type,
+      notice_type: message.notice_type,
+      message_id: message.message_id,
+      raw: message.raw
+    });
+    
     // 从消息中提取 self_id（如果还没有）
     if (!selfId.value && message.self_id) {
       selfId.value = message.self_id;
@@ -519,10 +529,57 @@ onMounted(async () => {
       return; // 发送的消息不需要后续处理
     }
     
+    // 处理撤回消息通知（在保存之前处理，避免 saveMessage 异常导致无法处理撤回）
+    console.log('[MainView] 收到消息:', message.post_type, message.sub_type, message);
+    if (message.post_type === 'notice' && (message.sub_type === 'group_recall' || message.sub_type === 'friend_recall')) {
+      console.log('[MainView] 检测到撤回消息通知, sub_type:', message.sub_type);
+      // 从 raw 中获取 message_id
+      // raw 的结构是 { GroupRecall: {...} } 或 { FriendRecall: {...} }
+      const raw = message.raw as any;
+      let messageId: number | undefined;
+      
+      if (raw?.GroupRecall?.message_id) {
+        messageId = raw.GroupRecall.message_id;
+      } else if (raw?.FriendRecall?.message_id) {
+        messageId = raw.FriendRecall.message_id;
+      }
+      
+      console.log('[MainView] 从 raw 中提取 message_id:', messageId, 'raw:', raw);
+      
+      if (messageId) {
+        console.log(`[MainView] 收到撤回消息通知: message_id=${messageId}, sub_type=${message.sub_type}`);
+        
+        try {
+          // 标记消息为已撤回
+          const { markMessageRecalled } = await import('../services/storage');
+          await markMessageRecalled(messageId, selfId.value || undefined);
+          console.log('[MainView] 已标记消息为已撤回');
+          
+          // 通知 ChatArea 更新显示
+          await nextTick();
+          if (chatAreaRef.value) {
+            console.log('[MainView] 调用 ChatArea.handleMessageRecalled');
+            chatAreaRef.value.handleMessageRecalled(messageId);
+          } else {
+            console.warn('[MainView] chatAreaRef.value 为空');
+          }
+        } catch (error) {
+          console.error('处理撤回消息失败:', error);
+        }
+      } else {
+        console.warn('[MainView] message_id 为空，无法处理撤回');
+      }
+      
+      // 撤回通知不需要后续的保存、显示和通知处理
+      return;
+    }
+    
     // 保存到数据库（使用 self_id）- 只处理接收的消息
+    console.log('[MainView] 准备保存消息到数据库:', message.post_type);
     if (message.post_type === 'message' || message.post_type === 'notice' || message.post_type === 'request') {
       try {
         await saveMessage(message, selfId.value || undefined);
+        console.log('[MainView] 消息已保存到数据库');
       } catch (error) {
         console.error('保存消息到数据库失败:', error);
       }
@@ -565,6 +622,17 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   if (statusUnlisten) statusUnlisten();
   if (messageUnlisten) messageUnlisten();
+});
+
+// 调试功能: 暴露到全局
+onMounted(() => {
+  (window as any).debugRecall = async (messageId: number) => {
+    const { checkMessageRecalled } = await import('../services/storage');
+    const result = await checkMessageRecalled(messageId, selfId.value || undefined);
+    console.log('消息撤回状态:', result);
+    return result;
+  };
+  console.log('调试函数已加载: window.debugRecall(messageId)');
 });
 
 // 获取状态颜色

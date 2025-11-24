@@ -40,6 +40,12 @@ const inputEditorRef = ref<HTMLElement | null>(null); // 富文本编辑器引�
 const showDebugPanel = ref(false); // 是否显示调试面板
 const isDev = import.meta.env.DEV; // 是否为开发环境
 
+// 右键菜单相关
+const showContextMenu = ref(false);
+const contextMenuX = ref(0);
+const contextMenuY = ref(0);
+const contextMenuMessage = ref<OneBotMessage | null>(null);
+
 // 过滤当前聊天的消息（包括发送的消息）
 const filteredMessages = computed(() => {
   if (!props.chatId || !props.chatType) return [];
@@ -1158,11 +1164,89 @@ onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside);
 });
 
+// 显示右键菜单
+const showMessageContextMenu = (event: MouseEvent, msg: OneBotMessage) => {
+  // 只有自己发送的消息且未被撤回才能撤回
+  if (msg.post_type !== 'message_sent' || msg.recalled) {
+    return;
+  }
+  
+  // 检查消息是否在2分钟内（120秒）
+  const now = Math.floor(Date.now() / 1000);
+  const messageTime = msg.time;
+  const timeDiff = now - messageTime;
+  
+  if (timeDiff > 120) {
+    console.warn('[ChatArea] 消息超过2分钟，无法撤回');
+    return;
+  }
+  
+  event.preventDefault();
+  contextMenuMessage.value = msg;
+  contextMenuX.value = event.clientX;
+  contextMenuY.value = event.clientY;
+  showContextMenu.value = true;
+};
+
+// 关闭右键菜单
+const closeContextMenu = () => {
+  showContextMenu.value = false;
+  contextMenuMessage.value = null;
+};
+
+// 撤回消息
+const recallMessage = async () => {
+  if (!contextMenuMessage.value || !contextMenuMessage.value.message_id) {
+    console.error('[ChatArea] 无法撤回消息：消息或 message_id 为空');
+    closeContextMenu();
+    return;
+  }
+  
+  const messageId = contextMenuMessage.value.message_id;
+  console.log('[ChatArea] 撤回消息:', messageId);
+  
+  try {
+    // 调用 API 撤回消息
+    await runbotService.deleteMessage(messageId);
+    console.log('[ChatArea] 消息撤回成功');
+    closeContextMenu();
+  } catch (error) {
+    console.error('[ChatArea] 撤回消息失败:', error);
+    closeContextMenu();
+  }
+};
+
+// 处理消息被撤回
+const handleMessageRecalled = async (messageId: number) => {
+  console.log('[ChatArea] handleMessageRecalled 被调用, messageId:', messageId);
+  console.log('[ChatArea] 当前消息列表:', messages.value.map(m => ({
+    message_id: m.message_id,
+    localMessageId: m.localMessageId,
+    raw_message: m.raw_message,
+    recalled: m.recalled
+  })));
+  
+  // 在内存中的消息列表中标记为已撤回
+  const msg = messages.value.find(m => m.message_id === messageId);
+  if (msg) {
+    console.log('[ChatArea] 找到消息，标记为已撤回');
+    msg.recalled = true;
+    // 强制 Vue 重新渲染
+    messages.value = [...messages.value];
+  } else {
+    console.warn('[ChatArea] 未找到 message_id 为', messageId, '的消息，重新加载消息列表');
+    // 重新加载消息列表（从数据库）
+    await loadChatMessages();
+  }
+};
+
 // 暴露方法供父组件调用
 defineExpose({
   addMessage,
   loadChatMessages,
+  handleMessageRecalled,
 });
+
 </script>
 
 <template>
@@ -1269,9 +1353,12 @@ defineExpose({
                 :class="{ 
                   'single-image': isSingleImage(parseMessage(msg)),
                   'image-only': isImageOnlyMessage(parseMessage(msg)) && !isSingleImage(parseMessage(msg)),
-                  'message-bubble': true
+                  'message-bubble': true,
+                  'message-recalled': msg.recalled
                 }"
+                @contextmenu="(e) => showMessageContextMenu(e, msg)"
               >
+                <div v-if="msg.recalled" class="recalled-notice">此消息已被撤回</div>
                 <template v-for="item in renderMessage(parseMessage(msg))" :key="item.key">
                   <span v-if="item.type === 'text'">{{ item.content }}</span>
                   <template v-else-if="item.type === 'image'">
@@ -1428,6 +1515,25 @@ defineExpose({
     <div v-else class="input-placeholder">
       选择一个聊天开始对话
     </div>
+
+    <!-- 右键菜单 -->
+    <div
+      v-if="showContextMenu"
+      class="context-menu"
+      :style="{ left: `${contextMenuX}px`, top: `${contextMenuY}px` }"
+      @click.stop
+    >
+      <div class="context-menu-item" @click="recallMessage">
+        <span>撤回消息</span>
+      </div>
+    </div>
+
+    <!-- 点击菜单外部关闭 -->
+    <div
+      v-if="showContextMenu"
+      class="context-menu-overlay"
+      @click="closeContextMenu"
+    ></div>
   </div>
 </template>
 
@@ -1784,6 +1890,59 @@ defineExpose({
 .message-text.single-face .cq-face-image {
   border-radius: 0;
   box-shadow: none;
+}
+
+/* 撤回的消息样式 */
+.message-text.message-recalled {
+  background: #f5f5f5 !important;
+  color: #999 !important;
+  opacity: 0.7;
+  font-style: italic;
+}
+
+.message-item.message-sent .message-text.message-recalled {
+  background: #e3f2fd !important;
+  color: #999 !important;
+}
+
+.recalled-notice {
+  font-size: 12px;
+  color: #999;
+  margin-bottom: 4px;
+}
+
+/* 右键菜单样式 */
+.context-menu {
+  position: fixed;
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  min-width: 120px;
+  overflow: hidden;
+}
+
+.context-menu-item {
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 14px;
+  color: #333;
+  transition: background 0.2s;
+}
+
+.context-menu-item:hover {
+  background: #f5f5f5;
+}
+
+.context-menu-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 999;
+  background: transparent;
 }
 
 /* 多个图片或表情：排列到气泡里（使用默认的气泡样式） */
