@@ -832,6 +832,26 @@ const parseMessage = (msg: OneBotMessage): CQSegment[] => {
   return parseCQCode(content);
 };
 
+// 根据 message_id 获取消息
+const getMessageById = (messageId: number): OneBotMessage | undefined => {
+  return messages.value.find(m => m.message_id === messageId);
+};
+
+// 获取被回复的消息（从 CQ 段中提取）
+const getReplyMessage = (segments: CQSegment[]): OneBotMessage | null => {
+  const replySegment = segments.find(s => s.type === 'reply');
+  if (!replySegment || !replySegment.data.id) {
+    return null;
+  }
+  
+  const replyMessageId = parseInt(replySegment.data.id);
+  if (isNaN(replyMessageId)) {
+    return null;
+  }
+  
+  return getMessageById(replyMessageId) || null;
+};
+
 // 检查消息是否只包含图片/表情（没有文本）
 // 判断是否为单个图片（没有文本，只有一个图片）
 const isSingleImage = (segments: CQSegment[]): boolean => {
@@ -1029,12 +1049,73 @@ const renderMessage = (segments: CQSegment[]): any[] => {
         displayName,
         key: `at-${index}`,
       };
+    } else if (segment.type === 'reply') {
+      // reply 类型不渲染，在外层处理
+      return null;
     } else {
       // 未知类型，显示原始文本
       return {
         type: 'text',
         content: `[CQ:${segment.type}]`,
         key: `unknown-${index}`,
+      };
+    }
+  }).filter(item => item !== null); // 过滤掉 null 项
+};
+
+// 渲染被回复的消息内容（简化版本，不展示回复的回复）
+const renderReplyMessage = (msg: OneBotMessage): any[] => {
+  const segments = parseMessage(msg);
+  
+  return segments.map((segment, index) => {
+    if (segment.type === 'text' && segment.text) {
+      return {
+        type: 'text',
+        content: segment.text,
+        key: `reply-text-${index}`,
+      };
+    } else if (segment.type === 'image') {
+      return {
+        type: 'text',
+        content: '[图片]',
+        key: `reply-image-${index}`,
+      };
+    } else if (segment.type === 'face') {
+      const faceText = getFaceDisplayText(segment.data.id || '');
+      return {
+        type: 'text',
+        content: faceText,
+        key: `reply-face-${index}`,
+      };
+    } else if (segment.type === 'at') {
+      const userId = segment.data.qq || '';
+      let displayName = `@${userId}`;
+      
+      // 如果是群聊，尝试从群成员缓存中获取昵称
+      if (props.chatType === 'group' && props.chatId && userId) {
+        const memberName = getGroupMemberDisplayName(props.chatId, parseInt(userId));
+        if (memberName !== `用户 ${userId}`) {
+          displayName = `@${memberName}`;
+        }
+      }
+      
+      return {
+        type: 'text',
+        content: displayName,
+        key: `reply-at-${index}`,
+      };
+    } else if (segment.type === 'reply') {
+      // 回复的回复，显示为固定文本
+      return {
+        type: 'text',
+        content: '[回复消息]',
+        key: `reply-reply-${index}`,
+      };
+    } else {
+      return {
+        type: 'text',
+        content: `[CQ:${segment.type}]`,
+        key: `reply-unknown-${index}`,
       };
     }
   });
@@ -1467,9 +1548,26 @@ defineExpose({
                   'message-bubble': true,
                   'message-recalled': msg.recalled
                 }"
-                @contextmenu="(e) => showMessageContextMenu(e, msg)"
+                @contextmenu="(e: MouseEvent) => showMessageContextMenu(e, msg)"
               >
                 <div v-if="msg.recalled" class="recalled-notice">此消息已被撤回</div>
+                
+                <!-- 被回复的消息 -->
+                <div v-if="!msg.recalled && getReplyMessage(parseMessage(msg))" class="reply-quote">
+                  <div class="reply-quote-line"></div>
+                  <div class="reply-quote-content">
+                    <div class="reply-quote-sender">
+                      {{ getSenderName(getReplyMessage(parseMessage(msg))!) }}
+                    </div>
+                    <div class="reply-quote-text">
+                      <template v-for="item in renderReplyMessage(getReplyMessage(parseMessage(msg))!)" :key="item.key">
+                        <span>{{ item.content }}</span>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- 消息内容 -->
                 <template v-for="item in renderMessage(parseMessage(msg))" :key="item.key">
                   <span v-if="item.type === 'text'">{{ item.content }}</span>
                   <template v-else-if="item.type === 'image'">
@@ -2100,13 +2198,72 @@ defineExpose({
   font-size: 15px;
   line-height: 1.4;
   word-wrap: break-word;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  position: relative;
+}
+
+/* 回复引用样式 */
+.reply-quote {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.reply-quote-line {
+  width: 3px;
+  background: linear-gradient(to bottom, #0088cc, #006699);
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.reply-quote-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.reply-quote-sender {
+  font-weight: 600;
+  color: #0088cc;
+  font-size: 12px;
+}
+
+.reply-quote-text {
+  color: #666;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.3;
+}
+
+/* 发送的消息中的回复引用 */
+.message-sent .reply-quote {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.message-sent .reply-quote-line {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.message-sent .reply-quote-sender {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.message-sent .reply-quote-text {
+  color: rgba(255, 255, 255, 0.7);
 }
 
 /* 发送的消息（无论私聊还是群组）：蓝色背景 */
 .message-item.message-sent .message-text {
   background: #0088cc;
   color: white;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
 /* 接收的消息（私聊和群组）：白色背景 */

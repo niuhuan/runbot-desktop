@@ -4,7 +4,7 @@
  */
 
 export interface CQSegment {
-  type: 'text' | 'image' | 'face' | 'at' | 'unknown';
+  type: 'text' | 'image' | 'face' | 'at' | 'reply' | 'unknown';
   data: Record<string, string>;
   text?: string; // 对于 text 类型，存储文本内容
 }
