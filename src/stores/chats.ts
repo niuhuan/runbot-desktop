@@ -35,8 +35,47 @@ const state = reactive<{
 /**
  * 格式化消息预览（将图片和表情替换为文本）
  */
-function formatMessagePreview(message: string): string {
-  if (!message) return '';
+function formatMessagePreview(message: string, fullMessage?: OneBotMessage): string {
+  if (!message) {
+    // 如果消息为空，尝试从完整消息对象中生成预览
+    if (fullMessage) {
+      // 处理请求类型的消息（加好友、加群请求）
+      if (fullMessage.post_type === 'request') {
+        if (fullMessage.request_type === 'friend') {
+          return `[好友请求] ${fullMessage.comment || ''}`;
+        } else if (fullMessage.request_type === 'group' && fullMessage.sub_type === 'add') {
+          // 加群请求，翻译群ID为群名称
+          const groupId = fullMessage.group_id;
+          if (groupId) {
+            const groupName = getGroupName(groupId);
+            return `[加群请求] ${groupName}`;
+          }
+          return `[加群请求]`;
+        } else if (fullMessage.request_type === 'group' && fullMessage.sub_type === 'invite') {
+          // 邀请入群请求
+          const groupId = fullMessage.group_id;
+          if (groupId) {
+            const groupName = getGroupName(groupId);
+            return `[邀请入群] ${groupName}`;
+          }
+          return `[邀请入群]`;
+        }
+      }
+      // 处理通知类型的消息
+      if (fullMessage.post_type === 'notice') {
+        if (fullMessage.notice_type === 'group_increase') {
+          return '[新成员加入群聊]';
+        } else if (fullMessage.notice_type === 'group_decrease') {
+          return '[成员退出群聊]';
+        } else if (fullMessage.notice_type === 'group_recall') {
+          return '[撤回了一条消息]';
+        } else if (fullMessage.notice_type === 'friend_recall') {
+          return '[撤回了一条消息]';
+        }
+      }
+    }
+    return '';
+  }
   
   const segments = parseCQCode(message);
   const parts: string[] = [];
@@ -117,6 +156,19 @@ export async function updateChatList(selfId?: number): Promise<void> {
         // 优先从群组列表获取名称，其次尝试从消息的 raw 中获取，最后使用默认格式
         chatName = getGroupName(msg.group_id);
         chatType = 'group';
+      } else if (msg.post_type === 'request') {
+        // 处理请求类型的消息（加好友、加群请求）
+        if (msg.request_type === 'friend' && msg.user_id) {
+          chatId = `private_${msg.user_id}`;
+          chatName = getContactName(msg.user_id);
+          chatType = 'private';
+        } else if (msg.request_type === 'group' && msg.group_id) {
+          chatId = `group_${msg.group_id}`;
+          chatName = getGroupName(msg.group_id);
+          chatType = 'group';
+        } else {
+          return; // 跳过无法识别的请求
+        }
       } else {
         return; // 跳过其他类型的消息
       }
@@ -155,7 +207,7 @@ export async function updateChatList(selfId?: number): Promise<void> {
       if (!chat.lastTime || msg.time > chat.lastTime) {
         chat.lastTime = msg.time;
         const rawMessage = msg.message || msg.raw_message || '';
-        chat.lastMessage = formatMessagePreview(rawMessage);
+        chat.lastMessage = formatMessagePreview(rawMessage, msg);
       }
     });
 
@@ -192,6 +244,19 @@ export function updateChatFromMessage(message: OneBotMessage, selfId?: number): 
     chatId = `group_${message.group_id}`;
     chatName = getGroupName(message.group_id);
     chatType = 'group';
+  } else if (message.post_type === 'request') {
+    // 处理请求类型的消息（加好友、加群请求）
+    if (message.request_type === 'friend' && message.user_id) {
+      chatId = `private_${message.user_id}`;
+      chatName = getContactName(message.user_id);
+      chatType = 'private';
+    } else if (message.request_type === 'group' && message.group_id) {
+      chatId = `group_${message.group_id}`;
+      chatName = getGroupName(message.group_id);
+      chatType = 'group';
+    } else {
+      return; // 跳过无法识别的请求
+    }
   } else {
     return; // 跳过其他类型的消息
   }
@@ -231,7 +296,7 @@ export function updateChatFromMessage(message: OneBotMessage, selfId?: number): 
   const rawMessage = message.message || message.raw_message || '';
   if (!chat.lastTime || message.time > chat.lastTime) {
     chat.lastTime = message.time;
-    chat.lastMessage = formatMessagePreview(rawMessage);
+    chat.lastMessage = formatMessagePreview(rawMessage, message);
   }
   
   // 如果不是自己发送的消息，增加未读数
