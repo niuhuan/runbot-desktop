@@ -40,6 +40,10 @@ pub struct OneBotMessage {
     pub raw_message: Option<String>,
     pub sender: Option<serde_json::Value>,
     pub raw: Option<serde_json::Value>,
+    // 请求相关字段
+    pub request_type: Option<String>,  // friend, group
+    pub comment: Option<String>,       // 验证消息
+    pub flag: Option<String>,          // 请求标识
 }
 
 // 将 runbot::event::Message 转换为 CQ 码格式的字符串
@@ -84,7 +88,7 @@ fn message_to_cqcode(message: &runbot::event::Message) -> String {
 }
 
 // 将 runbot::event::Post 转换为 OneBotMessage
-fn post_to_onebot_message(post: &runbot::event::Post, self_id: i64) -> Option<OneBotMessage> {
+fn post_to_onebot_message(post: &runbot::event::Post, self_id: i64, app_handle: &tauri::AppHandle) -> Option<OneBotMessage> {
     match post {
         runbot::event::Post::Message(msg) => {
             Some(OneBotMessage {
@@ -115,6 +119,9 @@ fn post_to_onebot_message(post: &runbot::event::Post, self_id: i64) -> Option<On
                     "card": msg.sender.card,
                 })),
                 raw: Some(serde_json::to_value(msg).ok()?),
+                request_type: None,
+                comment: None,
+                flag: None,
             })
         }
         runbot::event::Post::Notice(notice) => {
@@ -145,22 +152,98 @@ fn post_to_onebot_message(post: &runbot::event::Post, self_id: i64) -> Option<On
                 raw_message: None,
                 sender: None,
                 raw: Some(serde_json::to_value(notice).ok()?),
+                request_type: None,
+                comment: None,
+                flag: None,
             })
         }
         runbot::event::Post::Request(request) => {
+            // 处理请求事件（好友请求、群组请求）
+            // 从请求事件中提取 self_id
+            let request_self_id = match &request {
+                runbot::event::Request::Friend(req) => req.self_id,
+                runbot::event::Request::Group(req) => req.self_id,
+                _ => self_id,
+            };
+            
+            let (request_type, sub_type, user_id, group_id, comment, flag) = match &request {
+                runbot::event::Request::Friend(req) => {
+                    ("friend", None, Some(req.user_id), None, Some(req.comment.clone()), Some(req.flag.clone()))
+                }
+                runbot::event::Request::Group(req) => {
+                    let sub_type_str = match &req.sub_type {
+                        runbot::event::GroupRequestSubType::Add => "add",
+                        runbot::event::GroupRequestSubType::Invite => "invite",
+                        runbot::event::GroupRequestSubType::Unknown(s) => s.as_str(),
+                    };
+                    ("group", Some(sub_type_str.to_string()), Some(req.user_id), Some(req.group_id), Some(req.comment.clone()), Some(req.flag.clone()))
+                }
+                runbot::event::Request::Unknown(_) => ("unknown", None, None, None, None, None),
+            };
+            
+            // 如果有 flag,先保存到数据库
+            if let Some(flag_value) = &flag {
+                let flag_str = flag_value.clone();
+                let timestamp = chrono::Utc::now().timestamp();
+                let request_data = serde_json::json!({
+                    "id": format!("{}_{}_{}",  request_type, flag_str, timestamp),
+                    "time": timestamp,
+                    "request_type": request_type,
+                    "sub_type": sub_type,
+                    "user_id": user_id.unwrap_or(0),
+                    "user_name": format!("用户 {}", user_id.unwrap_or(0)),
+                    "nickname": format!("用户 {}", user_id.unwrap_or(0)),
+                    "comment": comment.as_deref().unwrap_or(""),
+                    "flag": flag_str,
+                    "group_id": group_id,
+                    "group_name": group_id.map(|id| format!("群 {}", id)),
+                    "status": "pending",
+                    "is_read": false
+                });
+                
+                tracing::info!("准备保存请求: flag={}, request_self_id={}, request_type={}", 
+                    flag_str, request_self_id, request_type);
+                
+                // 保存到数据库（异步，不阻塞）
+                let app_handle_clone = app_handle.clone();
+                let request_data_str = serde_json::to_string(&request_data).unwrap_or_default();
+                let flag_str_log = flag_str.clone();
+                let save_self_id = request_self_id;
+                tokio::spawn(async move {
+                    tracing::info!("开始保存请求到数据库: flag={}, self_id={}", flag_str_log, save_self_id);
+                    match crate::storage::save_request(
+                        request_data_str.clone(),
+                        Some(save_self_id),
+                        app_handle_clone
+                    ).await {
+                        Ok(id) => {
+                            tracing::info!("✅ 成功保存请求到数据库: flag={}, id={}, self_id={}", 
+                                flag_str_log, id, save_self_id);
+                        }
+                        Err(e) => {
+                            tracing::error!("❌ 保存请求到数据库失败: flag={}, self_id={}, error={}", 
+                                flag_str_log, save_self_id, e);
+                        }
+                    }
+                });
+            }
+            
             Some(OneBotMessage {
                 time: chrono::Utc::now().timestamp(),
-                self_id,
+                self_id: request_self_id,
                 post_type: "request".to_string(),
                 message_type: None,
-                sub_type: None,
+                sub_type,
                 message_id: None,
-                user_id: None,
-                group_id: None,
+                user_id,
+                group_id,
                 message: None,
                 raw_message: None,
                 sender: None,
                 raw: Some(serde_json::to_value(request).ok()?),
+                request_type: Some(request_type.to_string()),
+                comment,
+                flag,
             })
         }
         runbot::event::Post::Response(response) => {
@@ -218,6 +301,9 @@ fn post_to_onebot_message(post: &runbot::event::Post, self_id: i64) -> Option<On
                 raw_message: None,
                 sender: None,
                 raw: Some(raw_value),
+                request_type: None,
+                comment: None,
+                flag: None,
             })
         }
         runbot::event::Post::MetaEvent(meta) => {
@@ -236,6 +322,9 @@ fn post_to_onebot_message(post: &runbot::event::Post, self_id: i64) -> Option<On
                         raw_message: None,
                         sender: None,
                         raw: Some(serde_json::to_value(lifecycle).ok()?),
+                        request_type: None,
+                        comment: None,
+                        flag: None,
                     })
                 }
                 runbot::event::MetaEvent::Heartbeat(heartbeat) => {
@@ -252,6 +341,9 @@ fn post_to_onebot_message(post: &runbot::event::Post, self_id: i64) -> Option<On
                         raw_message: None,
                         sender: None,
                         raw: Some(serde_json::to_value(heartbeat).ok()?),
+                        request_type: None,
+                        comment: None,
+                        flag: None,
                     })
                 }
             }
@@ -278,6 +370,9 @@ fn post_to_onebot_message(post: &runbot::event::Post, self_id: i64) -> Option<On
                 raw_message: Some(msg.raw_message.clone()),
                 sender: None,
                 raw: Some(serde_json::to_value(msg).ok()?),
+                request_type: None,
+                comment: None,
+                flag: None,
             })
         }
         runbot::event::Post::Unknown(_) => None,
@@ -353,7 +448,7 @@ impl PostProcessor for TauriEventProcessor {
         }
         
         // 转换并发送事件
-        if let Some(message) = post_to_onebot_message(post, self_id) {
+        if let Some(message) = post_to_onebot_message(post, self_id, &self.app) {
             tracing::debug!(
                 "发送 runbot-message 事件: post_type={}, message_type={:?}, message_id={:?}, raw_message={:?}",
                 message.post_type,

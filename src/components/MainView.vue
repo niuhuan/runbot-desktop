@@ -5,6 +5,7 @@ import { runbotService } from '../services/runbot';
 import { useConnectionState, initConnectionStore, getConnectionState } from '../stores/connection';
 import { initContactsStore, getContactName, getGroupName } from '../stores/contacts';
 import { initChatsStore, updateChatFromMessage, updateChatList, clearUnreadCount } from '../stores/chats';
+import { useRequestsStore } from '../stores/requests';
 import { updateConfig } from '../services/config';
 import { saveMessage } from '../services/storage';
 import { initNotificationPermission, notifyChatMessage } from '../services/notify';
@@ -12,6 +13,7 @@ import ChatList from './ChatList.vue';
 import ContactList from './ContactList.vue';
 import GroupList from './GroupList.vue';
 import ChatArea from './ChatArea.vue';
+import RequestList from './RequestList.vue';
 
 const emit = defineEmits<{
   disconnect: []
@@ -19,6 +21,7 @@ const emit = defineEmits<{
 
 // 使用全局连接状态
 const { status: connectionStatus } = useConnectionState();
+const requestsStore = useRequestsStore();
 const selfId = ref<number | null>(null);
 const selfAvatar = ref<string | null>(null);
 const selfAvatarFailed = ref(false);
@@ -43,8 +46,8 @@ const onlineStatusOptions = [
 const contactsList = ref<Array<{ userId: number; nickname: string; remark?: string }>>([]);
 const groupsList = ref<Array<{ groupId: number; groupName: string }>>([]);
 
-// 左侧列表类型：'chat' | 'contact' | 'group'
-const leftPanelType = ref<'chat' | 'contact' | 'group'>('chat');
+// 左侧列表类型：'chat' | 'contact' | 'group' | 'request'
+const leftPanelType = ref<'chat' | 'contact' | 'group' | 'request'>('chat');
 
 // 监听左侧面板类型变化，当打开联系人或群组列表时，主动更新数据
 watch(leftPanelType, async (newType) => {
@@ -80,6 +83,7 @@ const chatListRef = ref<InstanceType<typeof ChatList> | null>(null);
 const contactListRef = ref<InstanceType<typeof ContactList> | null>(null);
 const groupListRef = ref<InstanceType<typeof GroupList> | null>(null);
 const chatAreaRef = ref<InstanceType<typeof ChatArea> | null>(null);
+const requestListRef = ref<InstanceType<typeof RequestList> | null>(null);
 
 // 断开连接
 const handleDisconnect = async () => {
@@ -299,6 +303,11 @@ onMounted(async () => {
     if (status.status === 'disconnected' || status.status === 'error') {
       emit('disconnect');
     } else if (status.status === 'connected' && selfId.value) {
+      // 连接成功后加载历史请求
+      await requestsStore.loadRequests();
+      // 补充请求的用户名和群组名
+      requestsStore.updateRequestNames(getContactName, getGroupName);
+      
       // 连接成功且有 self_id 时，先立即加载对话列表，然后再获取联系人列表和群组列表
       try {
         // 1. 先立即加载对话列表（从数据库）
@@ -351,9 +360,12 @@ onMounted(async () => {
   // 然后再获取联系人列表和群组列表，最后再次更新对话列表（因为名称可能已更新）
   if (selfId.value && connectionStatus.status === 'connected') {
     try {
-      // 1. 先立即加载对话列表（从数据库），让用户能看到消息列表
+      // 1. 先立即加载对话列表和请求列表（从数据库），让用户能立即看到内容
       console.log('[MainView] 组件挂载时，先加载对话列表（从数据库）');
       await updateChatList(selfId.value);
+      
+      console.log('[MainView] 组件挂载时，加载请求列表（从数据库）');
+      await requestsStore.loadRequests();
       
       // 2. 然后获取联系人列表和群组列表
       console.log('[MainView] 组件挂载时，主动加载联系人列表和群组列表');
@@ -362,9 +374,12 @@ onMounted(async () => {
       // 等待一下，确保数据已经更新到全局 store
       await nextTick();
       
-      // 3. 最后再次更新全局对话列表（因为联系人/群组名称可能已更新）
+      // 3. 最后再次更新全局对话列表和请求列表的名称（因为联系人/群组名称可能已更新）
       console.log('[MainView] 组件挂载时，联系人/群组列表已更新，重新加载对话列表');
       await updateChatList(selfId.value);
+      
+      console.log('[MainView] 组件挂载时，更新请求列表的名称');
+      requestsStore.updateRequestNames(getContactName, getGroupName);
     } catch (error) {
       console.error('[MainView] 组件挂载时加载失败:', error);
     }
@@ -571,6 +586,27 @@ onMounted(async () => {
       }
       
       // 撤回通知不需要后续的保存、显示和通知处理
+      return;
+    }
+    
+    // 处理好友请求和群组请求
+    if (message.post_type === 'request') {
+      console.log('[MainView] 收到请求事件:', message);
+      
+      // 后端已经保存到数据库，这里只需要重新加载请求列表
+      if (selfId.value) {
+        try {
+          // requestsStore 会自动使用全局的 selfId
+          await requestsStore.loadRequests();
+          // 补充请求的用户名和群组名
+          requestsStore.updateRequestNames(getContactName, getGroupName);
+          console.log('[MainView] 已重新加载请求列表');
+        } catch (error) {
+          console.error('[MainView] 重新加载请求列表失败:', error);
+        }
+      }
+      
+      // 请求事件不需要后续的保存、显示和通知处理
       return;
     }
     
@@ -812,6 +848,18 @@ watch(() => selfId.value, (newSelfId) => {
           </svg>
           <span class="nav-label">群组</span>
         </div>
+        <div class="nav-item" :class="{ active: leftPanelType === 'request' }" @click="leftPanelType = 'request'">
+          <div class="nav-icon-wrapper">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+              <circle cx="8.5" cy="7" r="4"></circle>
+              <line x1="20" y1="8" x2="20" y2="14"></line>
+              <line x1="23" y1="11" x2="17" y2="11"></line>
+            </svg>
+            <span v-if="requestsStore.unreadCount.value > 0" class="nav-badge">{{ requestsStore.unreadCount.value }}</span>
+          </div>
+          <span class="nav-label">请求</span>
+        </div>
         
         <!-- 底部状态和操作区域 -->
         <div class="nav-bottom">
@@ -929,6 +977,10 @@ watch(() => selfId.value, (newSelfId) => {
             v-if="leftPanelType === 'group'"
             ref="groupListRef"
             @selectGroup="handleSelectGroup"
+          />
+          <RequestList
+            v-if="leftPanelType === 'request'"
+            ref="requestListRef"
           />
         </div>
       </div>
@@ -1069,6 +1121,32 @@ watch(() => selfId.value, (newSelfId) => {
   height: 24px;
   margin-bottom: 4px;
   flex-shrink: 0;
+}
+
+.nav-icon-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nav-badge {
+  position: absolute;
+  top: -4px;
+  right: -8px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  background: #f44336;
+  color: white;
+  font-size: 10px;
+  font-weight: bold;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #f5f5f5;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .nav-label {

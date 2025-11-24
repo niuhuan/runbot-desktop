@@ -33,6 +33,10 @@ export interface OneBotMessage {
   // 通知类型相关
   notice_type?: string;  // 通知类型: group_recall, friend_recall等
   operator_id?: number;  // 操作者ID（撤回消息的人）
+  // 请求相关字段
+  request_type?: string; // 请求类型: friend, group
+  comment?: string;      // 验证消息/请求说明
+  flag?: string;         // 请求标识，用于处理请求
 }
 
 class RunbotService {
@@ -396,6 +400,41 @@ class RunbotService {
       group_id: groupId,
       user_id: userId,
       enable: enable,
+    });
+  }
+
+  /**
+   * 处理好友请求
+   * @param flag 请求标识
+   * @param approve 是否同意（true: 同意, false: 拒绝）
+   * @param remark 好友备注（仅在同意时有效）
+   */
+  async setFriendAddRequest(flag: string, approve: boolean, remark: string = ''): Promise<void> {
+    await this.sendMessage('set_friend_add_request', {
+      flag: flag,
+      approve: approve,
+      remark: remark,
+    });
+  }
+
+  /**
+   * 处理群组请求
+   * @param flag 请求标识
+   * @param sub_type 请求类型（add: 申请入群, invite: 邀请入群）
+   * @param approve 是否同意（true: 同意, false: 拒绝）
+   * @param reason 拒绝理由（仅在拒绝时有效）
+   */
+  async setGroupAddRequest(
+    flag: string,
+    subType: string,
+    approve: boolean,
+    reason: string = ''
+  ): Promise<void> {
+    await this.sendMessage('set_group_add_request', {
+      flag: flag,
+      sub_type: subType,
+      approve: approve,
+      reason: reason,
     });
   }
 }

@@ -116,12 +116,76 @@ fn init_database(conn: &Connection) -> SqlResult<()> {
         [],
     )?;
 
+    // 创建请求表
+    // 注意: 使用 user_id 和 group_id 组合来确保唯一性
+    // 好友请求: user_id 唯一 (group_id 为 NULL)
+    // 群请求: (group_id, user_id) 组合唯一
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS requests (
+            id TEXT PRIMARY KEY,
+            timestamp INTEGER NOT NULL,
+            request_type TEXT NOT NULL,
+            sub_type TEXT,
+            user_id INTEGER NOT NULL,
+            user_name TEXT NOT NULL,
+            nickname TEXT,
+            comment TEXT NOT NULL,
+            flag TEXT NOT NULL,
+            group_id INTEGER,
+            group_name TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            is_read INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER DEFAULT (strftime('%s', 'now')),
+            UNIQUE(user_id, group_id)
+        )",
+        [],
+    )?;
+
+    // 检查并添加 is_read 字段（如果表已存在但没有该字段）
+    let is_read_exists: bool = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('requests') WHERE name='is_read'",
+        [],
+        |row| row.get(0),
+    ).unwrap_or(0) > 0;
+    
+    if !is_read_exists {
+        conn.execute(
+            "ALTER TABLE requests ADD COLUMN is_read INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+
+    // 创建请求表索引
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_requests_timestamp ON requests(timestamp DESC)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_requests_user_id ON requests(user_id)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_requests_flag ON requests(flag)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_requests_is_read ON requests(is_read)",
+        [],
+    )?;
+
     Ok(())
 }
 
 /// 获取数据库连接（用户特定）
 fn get_connection(app: &AppHandle, self_id: Option<i64>) -> Result<Connection, String> {
     let db_path = get_db_path(app, self_id)?;
+    
+    tracing::info!("🔌 get_connection: self_id={:?}, db_path={:?}", self_id, db_path);
+    
     let conn = Connection::open(&db_path)
         .map_err(|e| format!("打开数据库失败: {}", e))?;
     
@@ -705,4 +769,264 @@ pub async fn check_message_recalled(
         }
         Err(e) => Err(format!("查询消息失败: {}", e))
     }
+}
+
+// ========== 请求存储 ==========
+
+/// 保存请求
+#[tauri::command]
+pub async fn save_request(
+    request_data: String,
+    self_id: Option<i64>,
+    app: AppHandle,
+) -> Result<String, String> {
+    tracing::info!("📝 save_request 被调用: self_id={:?}", self_id);
+    
+    let conn = get_connection(&app, self_id)?;
+    
+    tracing::info!("✅ 获取数据库连接成功");
+    
+    // 解析 JSON 数据
+    let req: Value = serde_json::from_str(&request_data)
+        .map_err(|e| format!("解析 JSON 失败: {}", e))?;
+    
+    let id = req["id"].as_str()
+        .ok_or_else(|| "缺少 id 字段".to_string())?
+        .to_string();
+    let timestamp = req["time"].as_i64()
+        .ok_or_else(|| "缺少 time 字段".to_string())?;
+    let request_type = req["request_type"].as_str()
+        .ok_or_else(|| "缺少 request_type 字段".to_string())?
+        .to_string();
+    let sub_type = req["sub_type"].as_str().map(|s| s.to_string());
+    let user_id = req["user_id"].as_i64()
+        .ok_or_else(|| "缺少 user_id 字段".to_string())?;
+    let user_name = req["user_name"].as_str()
+        .ok_or_else(|| "缺少 user_name 字段".to_string())?
+        .to_string();
+    let nickname = req["nickname"].as_str().map(|s| s.to_string());
+    let comment = req["comment"].as_str()
+        .unwrap_or("")
+        .to_string();
+    let flag = req["flag"].as_str()
+        .ok_or_else(|| "缺少 flag 字段".to_string())?
+        .to_string();
+    let group_id = req["group_id"].as_i64();
+    let group_name = req["group_name"].as_str().map(|s| s.to_string());
+    let status = req["status"].as_str()
+        .unwrap_or("pending")
+        .to_string();
+    let is_read = req["is_read"].as_bool().unwrap_or(false);
+    
+    tracing::info!("📊 解析请求数据: id={}, flag={}, request_type={}, user_id={}, group_id={:?}, status={}, is_read={}", 
+        id, flag, request_type, user_id, group_id, status, is_read);
+    
+    // 插入或替换请求（基于 user_id 和 group_id 的唯一约束）
+    // 当收到同一个用户的新请求时，会自动更新旧记录
+    // 好友请求: 同一个 user_id (group_id=NULL) 只保留最新的
+    // 群请求: 同一个 (group_id, user_id) 组合只保留最新的
+    let result = conn.execute(
+        "INSERT OR REPLACE INTO requests (
+            id, timestamp, request_type, sub_type, user_id, user_name, nickname,
+            comment, flag, group_id, group_name, status, is_read
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        params![
+            id,
+            timestamp,
+            request_type,
+            sub_type,
+            user_id,
+            user_name,
+            nickname,
+            comment,
+            flag,
+            group_id,
+            group_name,
+            status,
+            is_read as i64
+        ],
+    )
+    .map_err(|e| format!("插入请求失败: {}", e))?;
+    
+    tracing::info!("✅ 成功保存/更新请求到数据库: id={}, user_id={}, group_id={:?}, 影响行数={}", 
+        id, user_id, group_id, result);
+    
+    Ok(id)
+}
+
+/// 更新请求状态
+#[tauri::command]
+pub async fn update_request_status(
+    flag: String,
+    status: String,
+    self_id: Option<i64>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let conn = get_connection(&app, self_id)?;
+    
+    conn.execute(
+        "UPDATE requests SET status = ?1 WHERE flag = ?2",
+        params![status, flag],
+    )
+    .map_err(|e| format!("更新请求状态失败: {}", e))?;
+    
+    Ok(())
+}
+
+/// 获取请求列表
+#[tauri::command]
+pub async fn get_requests(
+    status: Option<String>,
+    limit: Option<u32>,
+    offset: Option<u32>,
+    self_id: Option<i64>,
+    app: AppHandle,
+) -> Result<Vec<String>, String> {
+    tracing::info!("🔍 get_requests 被调用: self_id={:?}, status={:?}, limit={:?}, offset={:?}", 
+        self_id, status, limit, offset);
+    
+    let conn = get_connection(&app, self_id)?;
+    
+    tracing::info!("✅ 获取数据库连接成功");
+    
+    let limit = limit.unwrap_or(100);
+    let offset = offset.unwrap_or(0);
+    
+    let mut query = "SELECT id, timestamp, request_type, sub_type, user_id, user_name, nickname, \
+                     comment, flag, group_id, group_name, status, is_read FROM requests WHERE 1=1".to_string();
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    
+    if let Some(s) = &status {
+        query.push_str(" AND status = ?");
+        params.push(Box::new(s.clone()));
+    }
+    
+    query.push_str(" ORDER BY timestamp DESC LIMIT ? OFFSET ?");
+    params.push(Box::new(limit as i32));
+    params.push(Box::new(offset as i32));
+    
+    tracing::info!("📝 执行查询 SQL: {}", query);
+    
+    let mut stmt = conn.prepare(&query)
+        .map_err(|e| format!("准备查询失败: {}", e))?;
+    
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    
+    let rows = stmt.query_map(
+        rusqlite::params_from_iter(param_refs.iter().copied()),
+        |row| {
+            let id: String = row.get(0)?;
+            let timestamp: i64 = row.get(1)?;
+            let request_type: String = row.get(2)?;
+            let sub_type: Option<String> = row.get(3)?;
+            let user_id: i64 = row.get(4)?;
+            let user_name: String = row.get(5)?;
+            let nickname: Option<String> = row.get(6)?;
+            let comment: String = row.get(7)?;
+            let flag: String = row.get(8)?;
+            let group_id: Option<i64> = row.get(9)?;
+            let group_name: Option<String> = row.get(10)?;
+            let status: String = row.get(11)?;
+            let is_read: i64 = row.get(12)?;
+            
+            let json = serde_json::json!({
+                "id": id,
+                "time": timestamp,
+                "request_type": request_type,
+                "sub_type": sub_type,
+                "user_id": user_id,
+                "user_name": user_name,
+                "nickname": nickname,
+                "comment": comment,
+                "flag": flag,
+                "group_id": group_id,
+                "group_name": group_name,
+                "status": status,
+                "is_read": is_read != 0
+            });
+            
+            Ok(serde_json::to_string(&json).unwrap_or_default())
+        },
+    )
+    .map_err(|e| format!("执行查询失败: {}", e))?;
+    
+    let mut requests = Vec::new();
+    for row in rows {
+        requests.push(row.map_err(|e| format!("读取行失败: {}", e))?);
+    }
+    
+    tracing::info!("✅ 查询完成，找到 {} 个请求", requests.len());
+    
+    Ok(requests)
+}
+
+/// 删除请求
+#[tauri::command]
+pub async fn delete_request(
+    flag: String,
+    self_id: Option<i64>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let conn = get_connection(&app, self_id)?;
+    
+    conn.execute(
+        "DELETE FROM requests WHERE flag = ?1",
+        params![flag],
+    )
+    .map_err(|e| format!("删除请求失败: {}", e))?;
+    
+    Ok(())
+}
+
+/// 清空历史请求（只保留待处理的）
+#[tauri::command]
+pub async fn clear_history_requests(
+    self_id: Option<i64>,
+    app: AppHandle,
+) -> Result<u32, String> {
+    let conn = get_connection(&app, self_id)?;
+    
+    let deleted = conn.execute(
+        "DELETE FROM requests WHERE status != 'pending'",
+        [],
+    )
+    .map_err(|e| format!("清空历史请求失败: {}", e))?;
+    
+    Ok(deleted as u32)
+}
+
+/// 标记请求为已读
+#[tauri::command]
+pub async fn mark_request_read(
+    flag: String,
+    self_id: Option<i64>,
+    app: AppHandle,
+) -> Result<(), String> {
+    let conn = get_connection(&app, self_id)?;
+    
+    conn.execute(
+        "UPDATE requests SET is_read = 1 WHERE flag = ?1",
+        params![flag],
+    )
+    .map_err(|e| format!("标记请求为已读失败: {}", e))?;
+    
+    Ok(())
+}
+
+/// 获取未读请求数量
+#[tauri::command]
+pub async fn get_unread_request_count(
+    self_id: Option<i64>,
+    app: AppHandle,
+) -> Result<i64, String> {
+    let conn = get_connection(&app, self_id)?;
+    
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM requests WHERE status = 'pending' AND is_read = 0",
+        [],
+        |row| row.get(0),
+    )
+    .map_err(|e| format!("获取未读请求数量失败: {}", e))?;
+    
+    Ok(count)
 }

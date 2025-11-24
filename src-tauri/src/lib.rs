@@ -275,6 +275,14 @@ pub fn run() {
             storage::get_message_stats,
             storage::mark_message_recalled,
             storage::check_message_recalled,
+            // 请求存储命令
+            storage::save_request,
+            storage::update_request_status,
+            storage::get_requests,
+            storage::delete_request,
+            storage::clear_history_requests,
+            storage::mark_request_read,
+            storage::get_unread_request_count,
             // 头像命令
             avatar::get_user_avatar,
             avatar::get_group_avatar,

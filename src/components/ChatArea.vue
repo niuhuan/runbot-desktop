@@ -608,7 +608,7 @@ const openImageViewer = async (imageUrl: string) => {
     
     console.log('创建图片查看器窗口:', { viewerUrl, newWidth, newHeight });
     
-    const imageViewerWindow = new WebviewWindow(windowId, {
+    new WebviewWindow(windowId, {
       url: viewerUrl,
       title: '图片查看器',
       width: newWidth,
