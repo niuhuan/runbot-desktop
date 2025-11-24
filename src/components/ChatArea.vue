@@ -4,7 +4,7 @@ import { runbotService, type OneBotMessage } from '../services/runbot';
 import { getMessages, saveMessage } from '../services/storage';
 import { parseCQCode, type CQSegment } from '../utils/cqcode';
 import { getFaceDisplayText, getFaceImageUrl } from '../utils/qq-face';
-import { getGroupMemberDisplayName } from '../stores/group-members';
+import { getGroupMemberDisplayName, getGroupMembers } from '../stores/group-members';
 import qface from 'qface';
 import { checkImageCache, downloadImage } from '../services/image';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
@@ -39,6 +39,7 @@ const showFacePicker = ref(false); // 是否显示表情选择器
 const facePickerRef = ref<HTMLElement | null>(null); // 表情选择器引用
 const inputEditorRef = ref<HTMLElement | null>(null); // 富文本编辑器引用
 const showDebugPanel = ref(false); // 是否显示调试面板
+const debugActiveTab = ref<'messages' | 'members'>('messages'); // debug 面板活动标签
 const isDev = import.meta.env.DEV; // 是否为开发环境
 
 // 右键菜单相关
@@ -64,6 +65,14 @@ const filteredMessages = computed(() => {
     }
     return false;
   }).sort((a, b) => a.time - b.time);
+});
+
+// 获取群成员列表（用于 debug 面板）
+const groupMembersList = computed(() => {
+  if (props.chatType !== 'group' || !props.chatId) {
+    return [];
+  }
+  return getGroupMembers(props.chatId);
 });
 
 // 时间段阈值（5分钟，单位：秒）
@@ -1326,29 +1335,81 @@ defineExpose({
     <!-- Debug 面板（仅开发环境显示） -->
     <div v-if="isDev && showDebugPanel" class="debug-panel">
       <div class="debug-panel-header">
-        <h3>消息调试面板</h3>
+        <h3>调试面板</h3>
         <button class="debug-close-button" @click="showDebugPanel = false">×</button>
       </div>
+      <div class="debug-panel-tabs">
+        <button 
+          class="debug-tab"
+          :class="{ active: debugActiveTab === 'messages' }"
+          @click="debugActiveTab = 'messages'"
+        >
+          消息列表
+        </button>
+        <button 
+          v-if="chatType === 'group'"
+          class="debug-tab"
+          :class="{ active: debugActiveTab === 'members' }"
+          @click="debugActiveTab = 'members'"
+        >
+          群成员 ({{ groupMembersList.length }})
+        </button>
+      </div>
       <div class="debug-panel-content">
-        <div class="debug-info">
-          <p><strong>总消息数：</strong>{{ messages.length }}</p>
-          <p><strong>当前聊天消息数：</strong>{{ filteredMessages.length }}</p>
-        </div>
-        <div class="debug-messages">
-          <h4>所有消息实体：</h4>
-          <div class="debug-message-list">
-            <div 
-              v-for="(msg, index) in messages" 
-              :key="msg.localMessageId || index"
-              class="debug-message-item"
-            >
-              <div class="debug-message-header">
-                <span class="debug-message-index">#{{ index + 1 }}</span>
-                <span class="debug-message-type">{{ msg.post_type }}</span>
-                <span v-if="msg.message_id" class="debug-message-id">ID: {{ msg.message_id }}</span>
-                <span v-if="msg.localMessageId" class="debug-local-id">Local: {{ msg.localMessageId.substring(0, 8) }}...</span>
+        <!-- 消息列表 Tab -->
+        <div v-if="debugActiveTab === 'messages'" class="debug-tab-content">
+          <div class="debug-info">
+            <p><strong>总消息数：</strong>{{ messages.length }}</p>
+            <p><strong>当前聊天消息数：</strong>{{ filteredMessages.length }}</p>
+          </div>
+          <div class="debug-messages">
+            <h4>所有消息实体：</h4>
+            <div class="debug-message-list">
+              <div 
+                v-for="(msg, index) in messages" 
+                :key="msg.localMessageId || index"
+                class="debug-message-item"
+              >
+                <div class="debug-message-header">
+                  <span class="debug-message-index">#{{ index + 1 }}</span>
+                  <span class="debug-message-type">{{ msg.post_type }}</span>
+                  <span v-if="msg.message_id" class="debug-message-id">ID: {{ msg.message_id }}</span>
+                  <span v-if="msg.localMessageId" class="debug-local-id">Local: {{ msg.localMessageId.substring(0, 8) }}...</span>
+                </div>
+                <pre class="debug-message-json">{{ JSON.stringify(msg, null, 2) }}</pre>
               </div>
-              <pre class="debug-message-json">{{ JSON.stringify(msg, null, 2) }}</pre>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 群成员列表 Tab -->
+        <div v-if="debugActiveTab === 'members' && chatType === 'group'" class="debug-tab-content">
+          <div class="debug-info">
+            <p><strong>群 ID：</strong>{{ chatId }}</p>
+            <p><strong>群成员数：</strong>{{ groupMembersList.length }}</p>
+          </div>
+          <div class="debug-members">
+            <h4>群成员列表：</h4>
+            <div v-if="groupMembersList.length === 0" class="debug-empty">
+              暂无群成员数据，请稍候...
+            </div>
+            <div v-else class="debug-member-list">
+              <div 
+                v-for="member in groupMembersList"
+                :key="member.userId"
+                class="debug-member-item"
+              >
+                <div class="debug-member-header">
+                  <span class="debug-member-id">{{ member.userId }}</span>
+                  <span class="debug-member-name">{{ member.card || member.nickname }}</span>
+                  <span v-if="member.role" class="debug-member-role">{{ member.role }}</span>
+                </div>
+                <div class="debug-member-info">
+                  <span v-if="member.card"><strong>群名片：</strong>{{ member.card }}</span>
+                  <span><strong>昵称：</strong>{{ member.nickname }}</span>
+                  <span v-if="member.title"><strong>头衔：</strong>{{ member.title }}</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1673,6 +1734,50 @@ defineExpose({
   padding: 16px;
 }
 
+/* Debug Panel Tabs */
+.debug-panel-tabs {
+  display: flex;
+  border-bottom: 1px solid #e5e5e5;
+  background-color: #fafafa;
+}
+
+.debug-tab {
+  flex: 0 0 auto;
+  padding: 12px 20px;
+  background: none;
+  border: none;
+  font-size: 14px;
+  color: #666;
+  cursor: pointer;
+  position: relative;
+  transition: color 0.2s;
+}
+
+.debug-tab:hover {
+  color: #333;
+}
+
+.debug-tab.active {
+  color: #0088cc;
+  font-weight: 600;
+}
+
+.debug-tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: #0088cc;
+}
+
+.debug-tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
 .debug-info {
   margin-bottom: 16px;
   padding: 12px;
@@ -1691,6 +1796,89 @@ defineExpose({
   font-size: 14px;
   font-weight: 600;
   color: #222;
+}
+
+.debug-messages,
+.debug-members {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.debug-members h4 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #222;
+}
+
+.debug-empty {
+  text-align: center;
+  color: #999;
+  padding: 40px 20px;
+  font-size: 14px;
+}
+
+.debug-member-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.debug-member-item {
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fafafa;
+  padding: 12px;
+}
+
+.debug-member-header {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.debug-member-id {
+  padding: 2px 8px;
+  background: #e3f2fd;
+  color: #1976d2;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: monospace;
+}
+
+.debug-member-name {
+  padding: 2px 8px;
+  background: #f3e5f5;
+  color: #7b1fa2;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.debug-member-role {
+  padding: 2px 8px;
+  background: #fff3e0;
+  color: #f57c00;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.debug-member-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #666;
+}
+
+.debug-member-info span {
+  line-height: 1.5;
 }
 
 .debug-message-list {
