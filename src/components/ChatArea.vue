@@ -1489,37 +1489,17 @@ defineExpose({
           style="display: none"
           @change="handleImageSelect"
         />
-        <div class="button-group">
-          <!-- 表情按钮 -->
-          <button
-            @click.stop="toggleFacePicker"
-            class="face-button"
-            :disabled="sending"
-            title="选择表情"
-            :class="{ active: showFacePicker }"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <circle cx="12" cy="12" r="10"></circle>
-              <path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
-              <line x1="9" y1="9" x2="9.01" y2="9"></line>
-              <line x1="15" y1="9" x2="15.01" y2="9"></line>
-            </svg>
-          </button>
-          
-          <!-- 图片按钮 -->
-          <button
-            @click="fileInputRef?.click()"
-            class="image-button"
-            :disabled="sending"
-            title="选择图片"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-              <circle cx="8.5" cy="8.5" r="1.5"></circle>
-              <polyline points="21 15 16 10 5 21"></polyline>
-            </svg>
-          </button>
-        </div>
+        <!-- 图片按钮（左侧） -->
+        <button
+          @click="fileInputRef?.click()"
+          class="image-button"
+          :disabled="sending"
+          title="附加图片"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 0 1 5 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5a2.5 2.5 0 0 0 5 0V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/>
+          </svg>
+        </button>
         
         <!-- 表情选择器气泡 -->
         <div v-if="showFacePicker" ref="facePickerRef" class="face-picker-popup">
@@ -1541,6 +1521,7 @@ defineExpose({
             </div>
           </div>
         </div>
+        
         <div
           ref="inputEditorRef"
           :contenteditable="!sending"
@@ -1554,6 +1535,22 @@ defineExpose({
           @compositionupdate="isComposing = true"
           @compositionend="isComposing = false; compositionEndTime = Date.now()"
         ></div>
+        
+        <!-- 表情按钮（右侧） -->
+        <button
+          @click.stop="toggleFacePicker"
+          class="face-button"
+          :disabled="sending"
+          title="选择表情"
+          :class="{ active: showFacePicker }"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="7" rx="2"></rect>
+            <rect x="14" y="3" width="7" height="7" rx="2"></rect>
+            <rect x="14" y="14" width="7" height="7" rx="2"></rect>
+            <rect x="3" y="14" width="7" height="7" rx="2"></rect>
+          </svg>
+        </button>
       </div>
     </div>
     <div v-else class="input-placeholder">
@@ -2167,13 +2164,6 @@ defineExpose({
   position: relative;
 }
 
-.button-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
 .face-button,
 .image-button {
   padding: 12px;
@@ -2186,6 +2176,7 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
 }
 
 .face-button svg,
@@ -2216,7 +2207,7 @@ defineExpose({
 .face-picker-popup {
   position: absolute;
   bottom: 100%;
-  left: 0;
+  right: 0;
   margin-bottom: 8px;
   background: white;
   border: 1px solid #e8e8e8;
@@ -2224,7 +2215,7 @@ defineExpose({
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   padding: 16px;
   width: 450px;
-  max-height: 500px;
+  max-height: min(500px, calc(100vh - 200px));
   overflow-y: auto;
   overflow-x: auto;
   z-index: 1000;
