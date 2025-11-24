@@ -1407,9 +1407,11 @@ const scrollToBottom = () => {
 
 // 保存当前聊天的输入状态
 const saveCurrentInputState = () => {
-  if (!props.chatId || !props.chatType) return;
+  if (!props.chatId || !props.chatType || !inputEditorRef.value) return;
   
-  const editorHtml = inputEditorRef.value?.innerHTML || '';
+  const editorHtml = inputEditorRef.value.innerHTML || '';
+  
+  console.log('[saveCurrentInputState] 保存输入状态:', props.chatType, props.chatId, '内容长度:', editorHtml.length);
   
   updateChatInputState(props.chatType, props.chatId, {
     editorHtml,
@@ -1426,10 +1428,13 @@ const restoreInputState = () => {
     }
     selectedImages.value.forEach(img => URL.revokeObjectURL(img.preview));
     selectedImages.value = [];
+    console.log('[restoreInputState] 清空输入框（无聊天选中）');
     return;
   }
   
   const state = getChatInputState(props.chatType, props.chatId);
+  
+  console.log('[restoreInputState] 恢复输入状态:', props.chatType, props.chatId, '内容长度:', state.editorHtml.length);
   
   // 恢复编辑器内容
   if (inputEditorRef.value) {
@@ -1441,10 +1446,19 @@ const restoreInputState = () => {
 };
 
 // 监听聊天变化
-watch(() => [props.chatId, props.chatType], (_newVal, oldVal) => {
+watch(() => [props.chatId, props.chatType], (newVal, oldVal) => {
   // 保存旧聊天的输入状态
-  if (oldVal && oldVal[0] && oldVal[1]) {
-    saveCurrentInputState();
+  if (oldVal && oldVal[0] && oldVal[1] && inputEditorRef.value) {
+    const oldChatType = oldVal[1] as 'private' | 'group';
+    const oldChatId = oldVal[0] as number;
+    const editorHtml = inputEditorRef.value.innerHTML || '';
+    
+    console.log('[watch] 保存旧聊天输入状态:', oldChatType, oldChatId, '内容长度:', editorHtml.length);
+    
+    updateChatInputState(oldChatType, oldChatId, {
+      editorHtml,
+      selectedImages: selectedImages.value,
+    });
   }
   
   // 重置头像加载失败状态
