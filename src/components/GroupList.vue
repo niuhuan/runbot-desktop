@@ -24,10 +24,13 @@ const contactsState = useContactsState();
 
 // 监听全局群组列表变化，同步到本地
 watch(() => contactsState.groups, (newGroups) => {
+  console.log('[GroupList] watch 触发，全局群组列表变化:', newGroups?.length || 0);
   try {
     if (!newGroups || !Array.isArray(newGroups)) {
+      console.log('[GroupList] newGroups 无效:', newGroups);
       return;
     }
+    console.log('[GroupList] 更新本地群组列表，数量:', newGroups.length);
     groups.value = newGroups.map(g => ({
       groupId: g.groupId,
       groupName: g.groupName,
@@ -35,6 +38,7 @@ watch(() => contactsState.groups, (newGroups) => {
       avatar: undefined,
       avatarFailed: false,
     }));
+    console.log('[GroupList] 本地群组列表已更新，当前数量:', groups.value.length);
     // 使用 nextTick 确保 DOM 更新后再设置头像
     nextTick(() => {
       try {

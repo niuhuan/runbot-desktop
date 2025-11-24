@@ -3,7 +3,7 @@
  * 统一维护联系人列表和群组列表，供所有组件使用
  */
 
-import { reactive, readonly } from 'vue';
+import { reactive } from 'vue';
 
 export interface Contact {
   userId: number;
@@ -32,14 +32,18 @@ const state = reactive<{
  * 更新联系人列表
  */
 export function updateContacts(contacts: Contact[]): void {
+  console.log('[ContactsStore] 更新联系人列表，数量:', contacts.length, contacts);
   state.contacts = contacts;
+  console.log('[ContactsStore] 联系人列表已更新，当前数量:', state.contacts.length);
 }
 
 /**
  * 更新群组列表
  */
 export function updateGroups(groups: Group[]): void {
+  console.log('[ContactsStore] 更新群组列表，数量:', groups.length, groups);
   state.groups = groups;
+  console.log('[ContactsStore] 群组列表已更新，当前数量:', state.groups.length);
 }
 
 /**
@@ -81,15 +85,10 @@ export function getGroupName(groupId: number): string {
 /**
  * 获取只读的联系人列表和群组列表
  * 返回响应式的状态对象，可以直接在模板中使用
+ * 注意：直接返回 state 对象以保持响应式追踪
  */
 export function useContactsState() {
-  return {
-    contacts: readonly(state.contacts),
-    groups: readonly(state.groups),
-    get initialized() {
-      return state.initialized;
-    },
-  };
+  return state;
 }
 
 /**

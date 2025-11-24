@@ -299,6 +299,7 @@ const handleSelectGroup = async (group: { groupId: number; groupName: string }) 
 // 监听状态变化
 let statusUnlisten: (() => void) | null = null;
 let messageUnlisten: (() => void) | null = null;
+let selfIdUnlisten: (() => void) | null = null;
 
 onMounted(async () => {
   // 初始化全局连接状态管理
@@ -350,7 +351,7 @@ onMounted(async () => {
   });
 
   // 监听 self_id 更新事件
-  const selfIdUnlisten = await listen<number>('runbot-self-id', async (event) => {
+  selfIdUnlisten = await listen<number>('runbot-self-id', async (event) => {
     selfId.value = event.payload;
     // 获取到 self_id 后，先立即加载对话列表，然后再获取联系人列表和群组列表
     if (selfId.value && connectionStatus.status === 'connected') {
@@ -432,6 +433,14 @@ onMounted(async () => {
                           (message.raw as any).status !== undefined);
     
     if (isApiResponse) {
+      console.log('[MainView] 检测到 API 响应:', {
+        post_type: message.post_type,
+        status: message.status || (message.raw as any)?.status,
+        retcode: message.retcode || (message.raw as any)?.retcode,
+        echo: message.echo || (message.raw as any)?.echo,
+        raw: message.raw,
+        message_full: message,
+      });
       // 尝试从不同位置获取响应数据
       let responseData: any = null;
       let action: string | null = null;
@@ -442,6 +451,7 @@ onMounted(async () => {
         responseData = raw.data;
         // 优先从 raw.action 获取（后端已添加）
         action = raw.action || message.action || null;
+        console.log('[MainView] 从 raw 中提取:', { action, hasData: !!responseData, dataLength: Array.isArray(responseData) ? responseData.length : 0 });
         
         // 如果还没有 action，尝试从 echo 中提取
         if (!action && raw.echo) {
@@ -773,17 +783,12 @@ onMounted(async () => {
       }
     }
   });
-
-  onBeforeUnmount(() => {
-    if (selfIdUnlisten) {
-      selfIdUnlisten();
-    }
-  });
 });
 
 onBeforeUnmount(() => {
   if (statusUnlisten) statusUnlisten();
   if (messageUnlisten) messageUnlisten();
+  if (selfIdUnlisten) selfIdUnlisten();
 });
 
 // 调试功能: 暴露到全局

@@ -264,12 +264,17 @@ fn post_to_onebot_message(post: &runbot::event::Post, self_id: i64, app_handle: 
                 if !data_array.is_empty() {
                     // 检查第一个元素的结构来推断
                     if let Some(first) = data_array.first() {
-                        if first.get("user_id").is_some() && first.get("nickname").is_some() {
-                            // 可能是好友列表
-                            Some("get_friend_list")
-                        } else if first.get("group_id").is_some() && first.get("group_name").is_some() {
-                            // 可能是群组列表
+                        // 群成员列表：有 group_id, user_id, nickname, role 等字段
+                        if first.get("group_id").is_some() && first.get("user_id").is_some() && first.get("role").is_some() {
+                            Some("get_group_member_list")
+                        }
+                        // 群组列表：有 group_id, group_name，但没有 user_id
+                        else if first.get("group_id").is_some() && first.get("group_name").is_some() && first.get("user_id").is_none() {
                             Some("get_group_list")
+                        }
+                        // 好友列表：有 user_id, nickname，但没有 group_id
+                        else if first.get("user_id").is_some() && first.get("nickname").is_some() && first.get("group_id").is_none() {
+                            Some("get_friend_list")
                         } else {
                             None
                         }
@@ -283,8 +288,22 @@ fn post_to_onebot_message(post: &runbot::event::Post, self_id: i64, app_handle: 
                 None
             };
             
+            // 调试：记录推断的 action
+            tracing::debug!("[Response] inferred_action = {:?}, data_array_len = {}", 
+                inferred_action, 
+                response.data.as_array().map(|a| a.len()).unwrap_or(0)
+            );
+            if let Some(data_array) = response.data.as_array() {
+                if let Some(first) = data_array.first() {
+                    tracing::debug!("[Response] first item keys: {:?}", 
+                        first.as_object().map(|o| o.keys().collect::<Vec<_>>())
+                    );
+                }
+            }
+            
             // 如果推断到了 action，添加到 raw 中
             if let Some(action) = inferred_action {
+                tracing::debug!("[Response] 添加 action 到 raw: {}", action);
                 raw_value["action"] = serde_json::Value::String(action.to_string());
             }
             

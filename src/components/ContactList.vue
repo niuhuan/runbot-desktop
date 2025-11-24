@@ -28,10 +28,13 @@ const contactsState = useContactsState();
 
 // 监听全局联系人列表变化，同步到本地
 watch(() => contactsState.contacts, (newContacts) => {
+  console.log('[ContactList] watch 触发，全局联系人列表变化:', newContacts?.length || 0);
   try {
     if (!newContacts || !Array.isArray(newContacts)) {
+      console.log('[ContactList] newContacts 无效:', newContacts);
       return;
     }
+    console.log('[ContactList] 更新本地联系人列表，数量:', newContacts.length);
     contacts.value = newContacts.map(c => ({
       userId: c.userId,
       nickname: c.nickname,
@@ -39,6 +42,7 @@ watch(() => contactsState.contacts, (newContacts) => {
       avatar: undefined,
       avatarFailed: false,
     }));
+    console.log('[ContactList] 本地联系人列表已更新，当前数量:', contacts.value.length);
     // 使用 nextTick 确保 DOM 更新后再设置头像
     nextTick(() => {
       try {
