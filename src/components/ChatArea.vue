@@ -619,6 +619,7 @@ const openImageViewer = async (imageUrl: string) => {
       focus: true,
       transparent: false,
       center: false,
+      visible: false, // 初始隐藏，等调整好大小后再显示
     });
     
     console.log('图片查看器窗口已创建');

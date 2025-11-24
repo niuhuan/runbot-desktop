@@ -462,9 +462,20 @@
           
           await window.setSize(new LogicalSize(width, height));
           await window.center();
+          // 调整完大小后显示窗口，避免闪烁
+          await window.show();
+          await window.setFocus();
         }
       } catch (error) {
         console.error('调整窗口大小失败:', error);
+        // 如果调整失败，也要显示窗口
+        try {
+          const window = getCurrentWindow();
+          await window.show();
+          await window.setFocus();
+        } catch (e) {
+          console.error('显示窗口失败:', e);
+        }
       }
     });
 
