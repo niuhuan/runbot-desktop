@@ -446,10 +446,12 @@ onMounted(async () => {
         // 如果还没有 action，尝试从 echo 中提取
         if (!action && raw.echo) {
           const echoStr = String(raw.echo);
-          if (echoStr.startsWith('get_friend_list_')) {
+          if (echoStr.includes('get_friend_list')) {
             action = 'get_friend_list';
-          } else if (echoStr.startsWith('get_group_list_')) {
+          } else if (echoStr.includes('get_group_list')) {
             action = 'get_group_list';
+          } else if (echoStr.includes('get_group_member_list')) {
+            action = 'get_group_member_list';
           }
         }
       }
@@ -459,6 +461,16 @@ onMounted(async () => {
         action = message.action || null;
       }
       
+      // 调试：打印 API 响应信息
+      if (responseData && Array.isArray(responseData) && responseData.length > 0) {
+        console.log('[MainView] API 响应:', {
+          action,
+          echo: message.echo || (message.raw as any)?.echo,
+          dataLength: responseData.length,
+          firstItemKeys: Object.keys(responseData[0] || {}),
+        });
+      }
+      
       // 处理好友列表响应
       // 检查 action 或通过 echo 匹配（如果 echo 包含请求信息）
       const isFriendListResponse = action === 'get_friend_list' || 
@@ -466,7 +478,23 @@ onMounted(async () => {
                                    (message.raw && (message.raw as any).echo && 
                                     String((message.raw as any).echo).includes('get_friend_list'));
       
-      if (isFriendListResponse && responseData && Array.isArray(responseData)) {
+      if (isFriendListResponse) {
+        console.log('[MainView] 检测到好友列表响应:', {
+          action,
+          hasResponseData: !!responseData,
+          isArray: Array.isArray(responseData),
+          dataLength: Array.isArray(responseData) ? responseData.length : 0,
+          firstItem: responseData && Array.isArray(responseData) && responseData.length > 0 ? responseData[0] : null,
+        });
+      }
+      
+      // 额外检查：确保不是群成员列表（群成员列表有 group_id 字段）
+      const isNotGroupMemberData = !(responseData && 
+                                    Array.isArray(responseData) && 
+                                    responseData.length > 0 && 
+                                    responseData[0].group_id !== undefined);
+      
+      if (isFriendListResponse && responseData && Array.isArray(responseData) && isNotGroupMemberData) {
         const contacts = responseData.map((item: any) => ({
           userId: item.user_id,
           nickname: item.nickname || `用户 ${item.user_id}`,
@@ -489,6 +517,16 @@ onMounted(async () => {
                                  (message.raw && (message.raw as any).echo && 
                                   String((message.raw as any).echo).includes('get_group_list'));
       
+      if (isGroupListResponse) {
+        console.log('[MainView] 检测到群组列表响应:', {
+          action,
+          hasResponseData: !!responseData,
+          isArray: Array.isArray(responseData),
+          dataLength: Array.isArray(responseData) ? responseData.length : 0,
+          firstItem: responseData && Array.isArray(responseData) && responseData.length > 0 ? responseData[0] : null,
+        });
+      }
+      
       if (isGroupListResponse && responseData && Array.isArray(responseData)) {
         const groups = responseData.map((item: any) => ({
           groupId: item.group_id,
@@ -510,21 +548,33 @@ onMounted(async () => {
       }
       
       // 处理群成员列表响应
+      // 只有当响应数据包含 group_id 和 user_id 且不是好友列表时才处理
       const isGroupMemberListResponse = action === 'get_group_member_list' ||
                                        (message.echo && message.echo.includes('get_group_member_list')) ||
                                        (message.raw && (message.raw as any).echo &&
                                         String((message.raw as any).echo).includes('get_group_member_list'));
       
-      if (isGroupMemberListResponse && responseData && Array.isArray(responseData)) {
-        // 从 echo 中提取 groupId
-        let groupId: number | undefined;
-        const echoStr = message.echo || (message.raw as any)?.echo;
-        if (echoStr) {
-          const match = String(echoStr).match(/get_group_member_list_(\d+)/);
-          if (match) {
-            groupId = parseInt(match[1]);
-          }
-        }
+      if (isGroupMemberListResponse) {
+        console.log('[MainView] 检测到群成员列表响应:', {
+          action,
+          echo: message.echo,
+          rawEcho: (message.raw as any)?.echo,
+          hasResponseData: !!responseData,
+          isArray: Array.isArray(responseData),
+          dataLength: Array.isArray(responseData) ? responseData.length : 0,
+          responseData: responseData && Array.isArray(responseData) ? responseData[0] : null,
+        });
+      }
+      
+      // 额外检查：确保数据结构包含 group_id 字段（群成员特有）
+      const hasGroupIdField = responseData && 
+                             Array.isArray(responseData) && 
+                             responseData.length > 0 && 
+                             responseData[0].group_id !== undefined;
+      
+      if (isGroupMemberListResponse && hasGroupIdField) {
+        // 从响应数据中的第一个成员提取 groupId
+        const groupId = responseData[0].group_id;
         
         if (groupId) {
           const members = responseData.map((item: any) => ({

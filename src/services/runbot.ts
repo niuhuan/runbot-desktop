@@ -295,6 +295,7 @@ class RunbotService {
    * 获取群成员列表
    */
   async getGroupMemberList(groupId: number): Promise<void> {
+    console.log(`[RunbotService] 请求获取群 ${groupId} 的成员列表`);
     await this.sendMessage('get_group_member_list', {
       group_id: groupId,
     });

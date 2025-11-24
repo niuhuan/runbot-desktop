@@ -1328,7 +1328,13 @@ defineExpose({
         @click="showDebugPanel = !showDebugPanel"
         :title="showDebugPanel ? '隐藏调试面板' : '显示调试面板'"
       >
-        🐛 Debug
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none"/>
+          <line x1="2" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.5"/>
+          <line x1="4.5" y1="8.5" x2="6.5" y2="8.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+          <line x1="4.5" y1="10.5" x2="8.5" y2="10.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+        </svg>
+        <span>Debug</span>
       </button>
     </div>
     
@@ -1664,6 +1670,9 @@ defineExpose({
 }
 
 .debug-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 6px 12px;
   background: #0088cc;
   color: white;
@@ -1673,6 +1682,14 @@ defineExpose({
   font-size: 12px;
   font-weight: 500;
   transition: background 0.15s;
+}
+
+.debug-button svg {
+  flex-shrink: 0;
+}
+
+.debug-button span {
+  line-height: 1;
 }
 
 .debug-button:hover {
@@ -2017,7 +2034,7 @@ defineExpose({
   flex-direction: row;
   align-items: flex-end;
   gap: 8px;
-  max-width: 70%;
+  max-width: 80%;
 }
 
 /* 群组消息：接收的消息靠左 */
@@ -2075,6 +2092,8 @@ defineExpose({
 }
 
 .message-text {
+  display: inline-block;
+  max-width: 100%;
   background: white;
   padding: 10px 14px;
   border-radius: 12px;
