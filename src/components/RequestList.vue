@@ -2,22 +2,13 @@
 import { ref, computed, watch } from 'vue';
 import { runbotService } from '../services/runbot';
 import { useRequestsStore, type RequestItem } from '../stores/requests';
-import { getUserAvatar } from '../services/avatar';
 
 const requestsStore = useRequestsStore();
 const selectedTab = ref<'pending' | 'history'>('pending');
 
-// 用户头像缓存
-const avatarCache = ref<Record<number, string>>({});
-
-// 加载用户头像
-const loadAvatar = async (userId: number) => {
-  if (!avatarCache.value[userId]) {
-    const avatar = await getUserAvatar(userId);
-    if (avatar) {
-      avatarCache.value[userId] = avatar;
-    }
-  }
+// 获取用户头像URL
+const getUserAvatarUrl = (userId: number) => {
+  return `asset://avatar/user/${userId}.png`;
 };
 
 // 待处理的请求
@@ -34,13 +25,6 @@ const historyRequests = computed(() => {
 const displayRequests = computed(() => {
   return selectedTab.value === 'pending' ? pendingRequests.value : historyRequests.value;
 });
-
-// 当显示的请求变化时,预加载所有用户头像
-watch(displayRequests, (requests) => {
-  requests.forEach(request => {
-    loadAvatar(request.user_id);
-  });
-}, { immediate: true });
 
 // 监听切换到待处理标签,自动标记所有未读请求为已读
 watch(selectedTab, (newTab) => {
@@ -214,14 +198,10 @@ defineExpose({
       >
         <div class="request-avatar">
           <img 
-            v-if="avatarCache[request.user_id]"
-            :src="avatarCache[request.user_id]" 
+            :src="getUserAvatarUrl(request.user_id)" 
             class="avatar-image"
             :alt="request.nickname || String(request.user_id)"
           />
-          <div v-else class="avatar-placeholder">
-            👤
-          </div>
           <div v-if="!request.is_read && request.status === 'pending'" class="unread-indicator"></div>
         </div>
 
