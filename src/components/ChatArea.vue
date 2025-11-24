@@ -10,6 +10,12 @@ import { checkImageCache, downloadImage } from '../services/image';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow, currentMonitor } from '@tauri-apps/api/window';
 import { listen } from '@tauri-apps/api/event';
+import { 
+  getChatInputState, 
+  updateChatInputState, 
+  clearChatInputState,
+  addMentionedUser 
+} from '../stores/chat-input';
 
 // 生成 UUID v4
 function generateUUID(): string {
@@ -41,6 +47,12 @@ const inputEditorRef = ref<HTMLElement | null>(null); // 富文本编辑器引�
 const showDebugPanel = ref(false); // 是否显示调试面板
 const debugActiveTab = ref<'messages' | 'members'>('messages'); // debug 面板活动标签
 const isDev = import.meta.env.DEV; // 是否为开发环境
+
+// @ 功能相关
+const showMentionPicker = ref(false); // 是否显示 @ 选择器
+const mentionPickerRef = ref<HTMLElement | null>(null); // @ 选择器引用
+const mentionSearchText = ref(''); // @ 搜索关键词
+const mentionPickerPosition = ref<{ top?: number; bottom?: number; left: number }>({ bottom: 0, left: 0 }); // @ 选择器位置
 
 // 右键菜单相关
 const showContextMenu = ref(false);
@@ -431,7 +443,15 @@ const extractContentFromEditor = (): string => {
   const walker = document.createTreeWalker(
     editor,
     NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT,
-    null
+    {
+      acceptNode: function(node) {
+        // 如果节点的父元素是 input-mention，跳过（避免重复提取 @ 文本）
+        if (node.parentElement && node.parentElement.classList.contains('input-mention')) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    }
   );
   
   let node;
@@ -447,6 +467,12 @@ const extractContentFromEditor = (): string => {
         const faceId = element.getAttribute('data-face-id');
         if (faceId) {
           result += `[CQ:face,id=${faceId}]`;
+        }
+      } else if (element.tagName === 'SPAN' && element.classList.contains('input-mention')) {
+        // 如果是 @ 元素，只提取 CQ 码，不提取文本内容
+        const userId = element.getAttribute('data-user-id');
+        if (userId) {
+          result += `[CQ:at,qq=${userId}]`;
         }
       } else if (element.tagName === 'BR') {
         // 换行符
@@ -478,6 +504,12 @@ const extractContentFromDiv = (div: HTMLElement): string => {
         if (faceId) {
           result += `[CQ:face,id=${faceId}]`;
         }
+      } else if (element.tagName === 'SPAN' && element.classList.contains('input-mention')) {
+        // 如果是 @ 元素
+        const userId = element.getAttribute('data-user-id');
+        if (userId) {
+          result += `[CQ:at,qq=${userId}]`;
+        }
       } else if (element.tagName === 'BR') {
         result += '\n';
       } else if (element.tagName === 'DIV') {
@@ -496,7 +528,204 @@ const extractContentFromDiv = (div: HTMLElement): string => {
 
 // 处理编辑器输入事件
 const handleEditorInput = () => {
-  // 可以在这里处理输入，比如限制某些内容
+  console.log('[handleEditorInput] 触发，chatType:', props.chatType);
+  
+  // 检查是否在群聊
+  if (props.chatType !== 'group' || !inputEditorRef.value) {
+    console.log('[handleEditorInput] 不是群聊或编辑器不存在，返回');
+    return;
+  }
+  
+  // 获取光标位置和之前的文本，检查是否输入了 @
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) {
+    console.log('[handleEditorInput] 没有选区');
+    return;
+  }
+  
+  const range = selection.getRangeAt(0);
+  const container = range.startContainer;
+  
+  console.log('[handleEditorInput] 容器节点类型:', container.nodeType, 'TEXT_NODE=', Node.TEXT_NODE);
+  
+  // 如果是文本节点
+  if (container.nodeType === Node.TEXT_NODE) {
+    const text = container.textContent || '';
+    const cursorPos = range.startOffset;
+    
+    console.log('[handleEditorInput] 文本内容:', text, '光标位置:', cursorPos);
+    
+    // 查找光标前最近的 @ 符号位置
+    const textBeforeCursor = text.substring(0, cursorPos);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+    
+    console.log('[handleEditorInput] 光标前文本:', textBeforeCursor, '最后的@位置:', lastAtIndex);
+    
+    if (lastAtIndex !== -1) {
+      // 检查 @ 之后是否只有字母、数字或空
+      const textAfterAt = textBeforeCursor.substring(lastAtIndex + 1);
+      
+      console.log('[handleEditorInput] @ 后面的文本:', textAfterAt);
+      
+      // 如果 @ 后面紧跟空格或已经是 CQ 码格式，不显示选择器
+      if (textAfterAt.length === 0 || /^[a-zA-Z0-9\u4e00-\u9fa5]*$/.test(textAfterAt)) {
+        console.log('[handleEditorInput] 显示 @ 选择器');
+        // 显示 @ 选择器
+        showMentionPicker.value = true;
+        mentionSearchText.value = textAfterAt;
+        
+        // 计算选择器位置（在输入框上方，使用固定位置）
+        // 选择器高度约 300px，向上偏移
+        try {
+          const editorRect = inputEditorRef.value!.getBoundingClientRect();
+          // 固定在输入框上方，留出一些间距
+          mentionPickerPosition.value = {
+            bottom: editorRect.height + 10, // 在输入框上方 10px
+            left: 10, // 左侧留 10px 边距
+          };
+        } catch (e) {
+          // 如果获取位置失败，使用默认位置
+          mentionPickerPosition.value = { bottom: 60, left: 10 };
+        }
+        
+        return;
+      }
+    }
+  }
+  
+  // 如果没有检测到 @，关闭选择器
+  showMentionPicker.value = false;
+  mentionSearchText.value = '';
+};
+
+// 过滤后的群成员列表（用于 @ 选择）
+const filteredMemberList = computed(() => {
+  if (props.chatType !== 'group' || !props.chatId) {
+    return [];
+  }
+  
+  const members = getGroupMembers(props.chatId);
+  const searchLower = mentionSearchText.value.toLowerCase();
+  
+  if (!searchLower) {
+    // 如果没有搜索词，返回所有成员（最多显示 10 个）
+    return members.slice(0, 10);
+  }
+  
+  // 根据搜索词过滤
+  return members.filter(member => {
+    const displayName = (member.card || member.nickname || '').toLowerCase();
+    const userId = String(member.userId);
+    return displayName.includes(searchLower) || userId.includes(searchLower);
+  }).slice(0, 10);
+});
+
+// 选择要 @ 的成员
+const selectMention = (userId: number, displayName: string) => {
+  console.log('[selectMention] 选择成员:', userId, displayName);
+  
+  if (!inputEditorRef.value || !props.chatId || !props.chatType) {
+    console.log('[selectMention] 编辑器或聊天信息不存在');
+    return;
+  }
+  
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) {
+    console.log('[selectMention] 没有选区');
+    return;
+  }
+  
+  console.log('[selectMention] 创建 @ 元素');
+  // 创建 @ 元素（类似表情元素）
+  const mentionSpan = document.createElement('span');
+  mentionSpan.className = 'input-mention';
+  mentionSpan.setAttribute('data-user-id', String(userId));
+  mentionSpan.setAttribute('data-display-name', displayName);
+  mentionSpan.setAttribute('contenteditable', 'false');
+  mentionSpan.textContent = `@${displayName}`;
+  mentionSpan.style.color = '#0088cc';
+  mentionSpan.style.backgroundColor = 'rgba(0, 136, 204, 0.1)';
+  mentionSpan.style.padding = '2px 6px';
+  mentionSpan.style.borderRadius = '4px';
+  mentionSpan.style.display = 'inline-block';
+  mentionSpan.style.margin = '0 2px';
+  mentionSpan.style.cursor = 'pointer';
+  
+  console.log('[selectMention] 插入 @ 元素');
+  
+  // 获取编辑器的完整内容
+  const editorHtml = inputEditorRef.value.innerHTML;
+  console.log('[selectMention] 编辑器原始 HTML:', editorHtml);
+  
+  // 找到最后一个 @ 的位置
+  const lastAtIndex = editorHtml.lastIndexOf('@');
+  
+  if (lastAtIndex !== -1) {
+    console.log('[selectMention] 找到 @ 位置:', lastAtIndex);
+    
+    // 删除 @ 到最后的所有内容（包括 @ 和后面的搜索文本）
+    const beforeAt = editorHtml.substring(0, lastAtIndex);
+    
+    // 创建临时容器来构建新 HTML
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = beforeAt;
+    
+    // 添加 @ 元素
+    tempDiv.appendChild(mentionSpan);
+    
+    // 添加空格
+    tempDiv.appendChild(document.createTextNode('\u00A0'));
+    
+    // 更新编辑器内容
+    inputEditorRef.value.innerHTML = tempDiv.innerHTML;
+    
+    console.log('[selectMention] 更新后 HTML:', inputEditorRef.value.innerHTML);
+    
+    // 将光标移到最后
+    const range = document.createRange();
+    const sel = window.getSelection();
+    range.selectNodeContents(inputEditorRef.value);
+    range.collapse(false); // 折叠到末尾
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+  } else {
+    console.log('[selectMention] 未找到 @，直接追加');
+    // 没找到 @，直接追加
+    inputEditorRef.value.appendChild(mentionSpan);
+    inputEditorRef.value.appendChild(document.createTextNode('\u00A0'));
+    
+    // 将光标移到最后
+    const range = document.createRange();
+    const sel = window.getSelection();
+    range.selectNodeContents(inputEditorRef.value);
+    range.collapse(false);
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+  }
+  
+  console.log('[selectMention] @ 元素插入完成，编辑器内容:', inputEditorRef.value.innerHTML);
+  
+  // 保存 @的用户（用于发送时构造 CQ 码）
+  addMentionedUser(props.chatType, props.chatId, userId, displayName);
+  
+  // 关闭选择器
+  showMentionPicker.value = false;
+  mentionSearchText.value = '';
+  
+  // 聚焦编辑器
+  inputEditorRef.value.focus();
+};
+
+// 点击外部关闭 @ 选择器
+const handleClickOutsideMention = (event: MouseEvent) => {
+  if (mentionPickerRef.value && !mentionPickerRef.value.contains(event.target as Node)) {
+    const target = event.target as HTMLElement;
+    // 如果点击的不是编辑器，关闭选择器
+    if (!target.closest('.rich-input-editor')) {
+      showMentionPicker.value = false;
+      mentionSearchText.value = '';
+    }
+  }
 };
 
 // 处理编辑器粘贴事件
@@ -666,6 +895,7 @@ const sendMessage = async () => {
   const messageArray: Array<{ type: string; data: Record<string, any> }> = [];
   
   // 解析输入框中的内容，将 CQ 码转换为数组元素
+  // @ 已经在 extractContentFromEditor 中转换为 [CQ:at,qq=userId] 了
   if (hasText) {
     const textContent = editorContent.trim();
     const segments = parseCQCode(textContent);
@@ -690,6 +920,17 @@ const sendMessage = async () => {
             type: 'face',
             data: {
               id: faceId,
+            },
+          });
+        }
+      } else if (segment.type === 'at') {
+        // @ 段
+        const qq = segment.data.qq;
+        if (qq) {
+          messageArray.push({
+            type: 'at',
+            data: {
+              qq: qq,
             },
           });
         }
@@ -745,6 +986,8 @@ const sendMessage = async () => {
       return `[CQ:image,file=${item.data.file}]`;
     } else if (item.type === 'face') {
       return `[CQ:face,id=${item.data.id}]`;
+    } else if (item.type === 'at') {
+      return `[CQ:at,qq=${item.data.qq}]`;
     }
     return '';
   }).join('');
@@ -797,6 +1040,11 @@ const sendMessage = async () => {
   // 清理预览 URL
   selectedImages.value.forEach(img => URL.revokeObjectURL(img.preview));
   selectedImages.value = [];
+  
+  // 同时清空聊天输入状态
+  if (props.chatId && props.chatType) {
+    clearChatInputState(props.chatType, props.chatId);
+  }
   
   sending.value = true;
   try {
@@ -1157,15 +1405,63 @@ const scrollToBottom = () => {
   });
 };
 
+// 保存当前聊天的输入状态
+const saveCurrentInputState = () => {
+  if (!props.chatId || !props.chatType) return;
+  
+  const editorHtml = inputEditorRef.value?.innerHTML || '';
+  
+  updateChatInputState(props.chatType, props.chatId, {
+    editorHtml,
+    selectedImages: selectedImages.value,
+  });
+};
+
+// 恢复当前聊天的输入状态
+const restoreInputState = () => {
+  if (!props.chatId || !props.chatType) {
+    // 如果没有选中聊天，清空输入框
+    if (inputEditorRef.value) {
+      inputEditorRef.value.innerHTML = '';
+    }
+    selectedImages.value.forEach(img => URL.revokeObjectURL(img.preview));
+    selectedImages.value = [];
+    return;
+  }
+  
+  const state = getChatInputState(props.chatType, props.chatId);
+  
+  // 恢复编辑器内容
+  if (inputEditorRef.value) {
+    inputEditorRef.value.innerHTML = state.editorHtml;
+  }
+  
+  // 恢复选中的图片
+  selectedImages.value = state.selectedImages;
+};
+
 // 监听聊天变化
-watch(() => [props.chatId, props.chatType], () => {
+watch(() => [props.chatId, props.chatType], (_newVal, oldVal) => {
+  // 保存旧聊天的输入状态
+  if (oldVal && oldVal[0] && oldVal[1]) {
+    saveCurrentInputState();
+  }
+  
   // 重置头像加载失败状态
   chatAvatarFailed.value = false;
   
   if (props.chatId && props.chatType) {
     loadChatMessages();
+    // 恢复新聊天的输入状态
+    nextTick(() => {
+      restoreInputState();
+    });
   } else {
     messages.value = [];
+    // 清空输入框
+    nextTick(() => {
+      restoreInputState();
+    });
   }
 }, { immediate: true });
 
@@ -1218,8 +1514,9 @@ onMounted(async () => {
     observeImagePlaceholders();
   });
   
-  // 监听点击外部关闭表情选择器
+  // 监听点击外部关闭表情选择器和 @ 选择器
   document.addEventListener('click', handleClickOutside);
+  document.addEventListener('click', handleClickOutsideMention);
   
   // 监听消息发送成功事件
   try {
@@ -1265,6 +1562,7 @@ onUnmounted(() => {
   
   // 移除点击外部监听
   document.removeEventListener('click', handleClickOutside);
+  document.removeEventListener('click', handleClickOutsideMention);
 });
 
 // 显示右键菜单
@@ -1527,7 +1825,7 @@ defineExpose({
                 :src="`asset://avatar/user/${group.userId}.png`" 
                 :alt="group.senderName"
                 class="message-avatar-image"
-                @error="(e) => { (e.target as HTMLImageElement).style.display = 'none'; }"
+                @error="(e: Event) => { (e.target as HTMLImageElement).style.display = 'none'; }"
               />
             </div>
             
@@ -1683,6 +1981,41 @@ defineExpose({
                 class="face-image"
               />
               <span v-else class="face-name">{{ face.name }}</span>
+            </div>
+          </div>
+        </div>
+        
+        <!-- @ 选择器气泡 -->
+        <div 
+          v-if="showMentionPicker && chatType === 'group'" 
+          ref="mentionPickerRef" 
+          class="mention-picker-popup"
+          :style="{ 
+            bottom: mentionPickerPosition.bottom !== undefined ? mentionPickerPosition.bottom + 'px' : undefined,
+            top: mentionPickerPosition.top !== undefined ? mentionPickerPosition.top + 'px' : undefined,
+            left: mentionPickerPosition.left + 'px' 
+          }"
+        >
+          <div v-if="filteredMemberList.length === 0" class="mention-picker-empty">
+            没有找到成员
+          </div>
+          <div v-else class="mention-picker-list">
+            <div
+              v-for="member in filteredMemberList"
+              :key="member.userId"
+              class="mention-item"
+              @click="selectMention(member.userId, member.card || member.nickname)"
+            >
+              <img 
+                :src="`asset://avatar/user/${member.userId}.png`" 
+                :alt="member.card || member.nickname"
+                class="mention-avatar"
+                @error="(e: Event) => { (e.target as HTMLImageElement).style.display = 'none'; }"
+              />
+              <div class="mention-info">
+                <div class="mention-name">{{ member.card || member.nickname }}</div>
+                <div class="mention-id">{{ member.userId }}</div>
+              </div>
             </div>
           </div>
         </div>
@@ -2423,6 +2756,13 @@ defineExpose({
   border-radius: 6px;
 }
 
+/* 自己发送的消息中的 @ 标签样式（白色背景，蓝色文字） */
+.message-item.message-sent .cq-at {
+  color: white;
+  background: rgba(255, 255, 255, 0.2);
+  font-weight: 600;
+}
+
 .input-area {
   padding: 16px;
   background: white;
@@ -2474,6 +2814,23 @@ defineExpose({
   height: 22px;
   margin: 0 2px;
   object-fit: contain;
+}
+
+/* 输入框中的 @ 用户样式 */
+.input-mention {
+  color: #0088cc !important;
+  background-color: rgba(0, 136, 204, 0.1) !important;
+  padding: 2px 6px !important;
+  border-radius: 4px !important;
+  display: inline-block !important;
+  margin: 0 2px !important;
+  cursor: pointer !important;
+  font-weight: 500 !important;
+  vertical-align: baseline !important;
+}
+
+.input-mention:hover {
+  background-color: rgba(0, 136, 204, 0.15) !important;
 }
 
 .selected-images {
@@ -2618,6 +2975,79 @@ defineExpose({
   text-align: center;
   color: #8e8e93;
   padding: 2px;
+}
+
+/* @ 选择器样式 */
+.mention-picker-popup {
+  position: absolute;
+  background: white;
+  border: 1px solid #e5e5e5;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 8px;
+  width: 280px;
+  max-height: 300px;
+  overflow-y: auto;
+  z-index: 1001;
+}
+
+.mention-picker-empty {
+  padding: 20px;
+  text-align: center;
+  color: #8e8e93;
+  font-size: 14px;
+}
+
+.mention-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mention-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.mention-item:hover {
+  background-color: #f4f4f5;
+}
+
+.mention-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #f0f0f0;
+  flex-shrink: 0;
+}
+
+.mention-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mention-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: #222;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mention-id {
+  font-size: 12px;
+  color: #8e8e93;
+  font-family: monospace;
 }
 
 
