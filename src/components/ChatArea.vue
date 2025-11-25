@@ -53,6 +53,7 @@ const showMentionPicker = ref(false); // 是否显示 @ 选择器
 const mentionPickerRef = ref<HTMLElement | null>(null); // @ 选择器引用
 const mentionSearchText = ref(''); // @ 搜索关键词
 const mentionPickerPosition = ref<{ top?: number; bottom?: number; left: number }>({ bottom: 0, left: 0 }); // @ 选择器位置
+const selectedMentionIndex = ref(0); // 当前选中的 @ 成员索引
 
 // 右键菜单相关
 const showContextMenu = ref(false);
@@ -576,6 +577,7 @@ const handleEditorInput = () => {
         // 显示 @ 选择器
         showMentionPicker.value = true;
         mentionSearchText.value = textAfterAt;
+        selectedMentionIndex.value = 0; // 重置选中索引
         
         // 计算选择器位置（在输入框上方，使用固定位置）
         // 选择器高度约 300px，向上偏移
@@ -599,6 +601,7 @@ const handleEditorInput = () => {
   // 如果没有检测到 @，关闭选择器
   showMentionPicker.value = false;
   mentionSearchText.value = '';
+  selectedMentionIndex.value = 0; // 重置选中索引
 };
 
 // 过滤后的群成员列表（用于 @ 选择）
@@ -778,6 +781,47 @@ const handleEditorPaste = async (event: ClipboardEvent) => {
 
 // 处理编辑器键盘事件
 const handleEditorKeyDown = (event: KeyboardEvent) => {
+  // 如果 @ 选择器正在显示，处理上下箭头和回车键
+  if (showMentionPicker.value && filteredMemberList.value.length > 0) {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      selectedMentionIndex.value = (selectedMentionIndex.value + 1) % filteredMemberList.value.length;
+      // 滚动到可见区域
+      nextTick(() => {
+        const selectedElement = mentionPickerRef.value?.querySelector('.mention-item.selected');
+        if (selectedElement) {
+          selectedElement.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+      });
+      return;
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      selectedMentionIndex.value = selectedMentionIndex.value === 0 
+        ? filteredMemberList.value.length - 1 
+        : selectedMentionIndex.value - 1;
+      // 滚动到可见区域
+      nextTick(() => {
+        const selectedElement = mentionPickerRef.value?.querySelector('.mention-item.selected');
+        if (selectedElement) {
+          selectedElement.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+      });
+      return;
+    } else if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      const selectedMember = filteredMemberList.value[selectedMentionIndex.value];
+      if (selectedMember) {
+        selectMention(selectedMember.userId, selectedMember.card || selectedMember.nickname);
+      }
+      return;
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      showMentionPicker.value = false;
+      selectedMentionIndex.value = 0;
+      return;
+    }
+  }
+  
   // Enter 键发送消息
   if (event.key === 'Enter' && !event.shiftKey) {
     // 检查输入法状态
@@ -2145,9 +2189,10 @@ defineExpose({
           </div>
           <div v-else class="mention-picker-list">
             <div
-              v-for="member in filteredMemberList"
+              v-for="(member, index) in filteredMemberList"
               :key="member.userId"
               class="mention-item"
+              :class="{ selected: index === selectedMentionIndex }"
               @click="selectMention(member.userId, member.card || member.nickname)"
             >
               <img 
@@ -3260,6 +3305,11 @@ defineExpose({
 
 .mention-item:hover {
   background-color: #f4f4f5;
+}
+
+.mention-item.selected {
+  background-color: #e8f4ff;
+  border: 1px solid #0088cc;
 }
 
 .mention-avatar {
