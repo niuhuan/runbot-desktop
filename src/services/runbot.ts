@@ -43,6 +43,7 @@ class RunbotService {
   private statusListeners: UnlistenFn[] = [];
   private messageListeners: UnlistenFn[] = [];
   private isConnected = false;
+  private apiResponseCallbacks: Map<string, (data: any) => void> = new Map();
 
   /**
    * 连接 Runbot WebSocket 服务器
@@ -99,6 +100,63 @@ class RunbotService {
       action,
       params,
     });
+  }
+
+  /**
+   * 发送 OneBot API 请求并等待响应
+   */
+  async sendMessageWithResponse(action: string, params: Record<string, any>, timeout = 10000): Promise<any> {
+    if (!this.isConnected) {
+      throw new Error('未连接到 Runbot 服务器');
+    }
+
+    // 生成唯一的 echo 标识
+    const echo = `${action}-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+
+    // 创建一个 Promise 来等待响应
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        this.apiResponseCallbacks.delete(echo);
+        reject(new Error(`API 请求超时: ${action}`));
+      }, timeout);
+
+      // 注册回调
+      this.apiResponseCallbacks.set(echo, (data: any) => {
+        clearTimeout(timeoutId);
+        this.apiResponseCallbacks.delete(echo);
+        resolve(data);
+      });
+
+      // 发送请求（带 echo）
+      invoke('send_runbot_message', {
+        action,
+        params: { ...params, echo },
+      }).catch((error) => {
+        clearTimeout(timeoutId);
+        this.apiResponseCallbacks.delete(echo);
+        reject(error);
+      });
+    });
+  }
+
+  /**
+   * 处理 API 响应（需要从外部调用）
+   */
+  handleApiResponse(message: OneBotMessage): void {
+    // 尝试从 message.echo 或 message.raw.echo 获取 echo
+    const echo = message.echo || (message.raw && typeof message.raw === 'object' ? (message.raw as any).echo : null);
+    
+    console.log('[RunbotService] handleApiResponse:', { echo, hasCallback: echo ? this.apiResponseCallbacks.has(echo) : false });
+    
+    if (echo && this.apiResponseCallbacks.has(echo)) {
+      const callback = this.apiResponseCallbacks.get(echo);
+      if (callback) {
+        // 尝试从不同位置获取 data
+        const data = message.data || (message.raw && typeof message.raw === 'object' ? (message.raw as any).data : null);
+        console.log('[RunbotService] 调用 API 响应回调, echo:', echo, 'data:', data);
+        callback(data);
+      }
+    }
   }
 
   /**
@@ -437,6 +495,23 @@ class RunbotService {
       approve: approve,
       reason: reason,
     });
+  }
+
+  /**
+   * 获取合并转发消息内容
+   * @param id 合并转发消息 ID
+   */
+  async getForwardMessage(id: string): Promise<any> {
+    console.log('[RunbotService] getForwardMessage 开始, id:', id);
+    try {
+      // 直接调用 Rust 后端的方法
+      const result = await invoke('get_forward_message', { id });
+      console.log('[RunbotService] getForwardMessage 成功, result:', result);
+      return result;
+    } catch (error) {
+      console.error('[RunbotService] getForwardMessage 失败:', error);
+      throw error;
+    }
   }
 }
 

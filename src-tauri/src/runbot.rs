@@ -1001,3 +1001,41 @@ pub async fn send_runbot_message(
         Err("BotContext 不存在".to_string())
     }
 }
+
+/// 获取合并转发消息内容
+#[tauri::command]
+pub async fn get_forward_message(
+    id: String,
+    state: State<'_, Arc<Mutex<RunbotState>>>,
+) -> Result<serde_json::Value, String> {
+    let bot_ctx = {
+        let state_guard = state.lock().map_err(|e| format!("锁定状态失败: {}", e))?;
+        
+        if !state_guard.connected {
+            return Err("未连接到 Runbot 服务器".to_string());
+        }
+
+        state_guard.bot_ctx.clone()
+    };
+
+    if let Some(bot_ctx) = bot_ctx {
+        // 直接调用 websocket_send 获取原始响应，不进行解析
+        let response = bot_ctx
+            .websocket_send("get_forward_msg", serde_json::json!({
+                "id": id,
+            }))
+            .await
+            .map_err(|e| format!("发送获取合并转发消息请求失败: {}", e))?;
+        
+        // 等待响应数据
+        let data = response
+            .data(tokio::time::Duration::from_secs(10))
+            .await
+            .map_err(|e| format!("获取合并转发消息响应失败: {}", e))?;
+        
+        // 直接返回原始 JSON 数据
+        Ok(data)
+    } else {
+        Err("未连接到 Runbot 服务器".to_string())
+    }
+}

@@ -115,6 +115,8 @@ function formatMessagePreview(message: string, fullMessage?: OneBotMessage): str
       parts.push(getFaceDisplayText(faceId));
     } else if (segment.type === 'at') {
       parts.push(`@${segment.data.qq || ''}`);
+    } else if (segment.type === 'forward') {
+      parts.push('[聊天记录]');
     }
   }
   

@@ -1318,6 +1318,13 @@ const renderMessage = (segments: CQSegment[]): any[] => {
     } else if (segment.type === 'reply') {
       // reply 类型不渲染，在外层处理
       return null;
+    } else if (segment.type === 'forward') {
+      // 合并转发消息
+      return {
+        type: 'forward',
+        id: segment.data.id || '',
+        key: `forward-${index}`,
+      };
     } else {
       // 未知类型，显示原始文本
       return {
@@ -1713,6 +1720,59 @@ const recallMessage = async () => {
   }
 };
 
+// 打开合并转发消息查看器
+const openForwardMessage = async (forwardId: string) => {
+  console.log('[ChatArea] 打开合并转发消息:', forwardId);
+  
+  try {
+    // 使用固定的窗口 ID（类似图片查看器）
+    const windowId = 'forward-viewer';
+    
+    // 检查窗口是否已存在
+    const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+    const existingWindow = await WebviewWindow.getByLabel(windowId);
+    
+    if (existingWindow) {
+      // 如果窗口已存在，关闭它
+      try {
+        await existingWindow.close();
+      } catch (e) {
+        console.warn('[ChatArea] 关闭已存在的窗口失败:', e);
+      }
+    }
+    
+    // 构建 URL（开发环境使用 localhost，生产环境使用相对路径）
+    const isDev = import.meta.env.DEV;
+    const baseUrl = isDev ? 'http://localhost:1420' : '';
+    const viewerUrl = `${baseUrl}/src/pages/forward-viewer.html?id=${forwardId}`;
+    
+    console.log('[ChatArea] 创建转发消息查看器窗口:', viewerUrl);
+    
+    // 创建新窗口
+    const webview = new WebviewWindow(windowId, {
+      url: viewerUrl,
+      title: '聊天记录',
+      width: 800,
+      height: 600,
+      center: true,
+      visible: true, // 直接显示窗口
+    });
+    
+    // 监听窗口加载完成
+    webview.once('tauri://created', () => {
+      console.log('[ChatArea] 合并转发查看器窗口已创建');
+    });
+    
+    webview.once('tauri://error', (e) => {
+      console.error('[ChatArea] 创建合并转发查看器窗口失败:', e);
+      alert('打开窗口失败');
+    });
+  } catch (error) {
+    console.error('[ChatArea] 打开合并转发消息失败:', error);
+    alert('打开窗口失败');
+  }
+};
+
 // 处理消息被撤回
 const handleMessageRecalled = async (messageId: number) => {
   console.log('[ChatArea] handleMessageRecalled 被调用, messageId:', messageId);
@@ -1980,6 +2040,12 @@ defineExpose({
                     <span v-else class="cq-face">{{ getFaceDisplayText(item.id) }}</span>
                   </template>
                   <span v-else-if="item.type === 'at'" class="cq-at">{{ item.displayName || `@${item.qq}` }}</span>
+                  <div v-else-if="item.type === 'forward'" class="forward-message" @click="openForwardMessage(item.id)">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" class="forward-icon">
+                      <path d="M20 8h-3V4H3c-1.1 0-2 .9-2 2v11h2c0 1.66 1.34 3 3 3s3-1.34 3-3h6c0 1.66 1.34 3 3 3s3-1.34 3-3h2v-5l-3-4zM6 18.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm13.5-9l1.96 2.5H17V9.5h2.5zm-1.5 9c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
+                    </svg>
+                    <span>查看聊天记录</span>
+                  </div>
                 </template>
               </div>
             </div>
@@ -2846,6 +2912,42 @@ defineExpose({
   color: white;
   background: rgba(255, 255, 255, 0.2);
   font-weight: 600;
+}
+
+/* 合并转发消息样式 */
+.forward-message {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: #f0f9ff;
+  border: 1px solid #0088cc;
+  border-radius: 8px;
+  cursor: pointer;
+  color: #0088cc;
+  font-size: 14px;
+  transition: all 0.15s;
+  user-select: none;
+}
+
+.forward-message:hover {
+  background: #e0f2ff;
+  border-color: #0077b3;
+}
+
+.forward-icon {
+  flex-shrink: 0;
+}
+
+.message-item.message-sent .forward-message {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.4);
+  color: white;
+}
+
+.message-item.message-sent .forward-message:hover {
+  background: rgba(255, 255, 255, 0.25);
+  border-color: rgba(255, 255, 255, 0.6);
 }
 
 .input-area {

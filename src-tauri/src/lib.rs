@@ -164,7 +164,7 @@ pub fn run() {
                         }
                     }
                 } else if uri_str.starts_with("asset://localhost/") {
-                    // 兼容旧的格式：asset://localhost/user_xxx/avatars/xxx.png
+                    // 兼容旧的格式：asset://localhost/user_xxx/avatars/xxx.png 和 asset://localhost/images/xxx.jpg
                     let path_part = uri_str.strip_prefix("asset://localhost/")
                         .unwrap_or(&uri_str);
                     
@@ -173,10 +173,11 @@ pub fn run() {
                         Err(_) => path_part.to_string(),
                     };
                     
-                    if !decoded_path.starts_with("user_") {
+                    // 允许访问 user_ 开头的路径和 images 目录
+                    if !decoded_path.starts_with("user_") && !decoded_path.starts_with("images/") {
                         return tauri::http::Response::builder()
                             .status(403)
-                            .body(format!("Access denied: invalid path (must start with 'user_'): {}", decoded_path).as_bytes().to_vec())
+                            .body(format!("Access denied: invalid path (must start with 'user_' or 'images/'): {}", decoded_path).as_bytes().to_vec())
                             .unwrap();
                     }
                     
@@ -261,6 +262,7 @@ pub fn run() {
             runbot::get_runbot_status,
             runbot::get_runbot_self_id,
             runbot::send_runbot_message,
+            runbot::get_forward_message,
             // 存储命令
             storage::save_config,
             storage::load_config,

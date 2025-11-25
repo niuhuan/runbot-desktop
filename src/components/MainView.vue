@@ -441,6 +441,7 @@ onMounted(async () => {
         raw: message.raw,
         message_full: message,
       });
+      
       // 尝试从不同位置获取响应数据
       let responseData: any = null;
       let action: string | null = null;
