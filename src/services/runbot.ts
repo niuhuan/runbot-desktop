@@ -42,36 +42,24 @@ export interface OneBotMessage {
 class RunbotService {
   private statusListeners: UnlistenFn[] = [];
   private messageListeners: UnlistenFn[] = [];
-  private isConnected = false;
   private apiResponseCallbacks: Map<string, (data: any) => void> = new Map();
 
   /**
    * 连接 Runbot WebSocket 服务器
    */
   async connect(wsUrl: string, accessToken?: string): Promise<void> {
-    try {
-      await invoke('connect_runbot', {
-        wsUrl,
-        accessToken: accessToken || null,
-      });
-      this.isConnected = true;
-    } catch (error) {
-      this.isConnected = false;
-      throw error;
-    }
+    await invoke('connect_runbot', {
+      wsUrl,
+      accessToken: accessToken || null,
+    });
   }
 
   /**
    * 断开连接
    */
   async disconnect(): Promise<void> {
-    try {
-      await invoke('disconnect_runbot');
-      this.isConnected = false;
-      this.cleanupListeners();
-    } catch (error) {
-      throw error;
-    }
+    await invoke('disconnect_runbot');
+    this.cleanupListeners();
   }
 
   /**
@@ -92,10 +80,6 @@ class RunbotService {
    * 发送 OneBot API 请求
    */
   async sendMessage(action: string, params: Record<string, any>): Promise<void> {
-    if (!this.isConnected) {
-      throw new Error('未连接到 Runbot 服务器');
-    }
-
     await invoke('send_runbot_message', {
       action,
       params,
@@ -106,10 +90,6 @@ class RunbotService {
    * 发送 OneBot API 请求并等待响应
    */
   async sendMessageWithResponse(action: string, params: Record<string, any>, timeout = 10000): Promise<any> {
-    if (!this.isConnected) {
-      throw new Error('未连接到 Runbot 服务器');
-    }
-
     // 生成唯一的 echo 标识
     const echo = `${action}-${Date.now()}-${Math.random().toString(36).substring(7)}`;
 
@@ -165,12 +145,6 @@ class RunbotService {
   async onStatusChange(callback: (status: ConnectionStatus) => void): Promise<UnlistenFn> {
     const unlisten = await listen<ConnectionStatus>('runbot-status', (event) => {
       console.log('runbot-status', event.payload);
-      const status = event.payload.status;
-      if (status === 'connected') {
-        this.isConnected = true;
-      } else if (status === 'disconnected' || status === 'error') {
-        this.isConnected = false;
-      }
       callback(event.payload);
     });
 
@@ -210,13 +184,6 @@ class RunbotService {
     this.messageListeners.forEach((unlisten) => unlisten());
     this.statusListeners = [];
     this.messageListeners = [];
-  }
-
-  /**
-   * 获取连接状态
-   */
-  get connected(): boolean {
-    return this.isConnected;
   }
 
   // ========== 常用 OneBot API 封装方法 ==========
@@ -512,6 +479,162 @@ class RunbotService {
       console.error('[RunbotService] getForwardMessage 失败:', error);
       throw error;
     }
+  }
+
+  // ========== 调试 API ==========
+
+  /**
+   * 获取群信息（调试用）
+   */
+  async debugGetGroupInfo(groupId: number, noCache: boolean = false): Promise<any> {
+    console.log('[RunbotService] 调用 get_group_info, groupId:', groupId, 'noCache:', noCache);
+    try {
+      const result = await this.sendMessageWithResponse('get_group_info', {
+        group_id: groupId,
+        no_cache: noCache,
+      });
+      console.log('[RunbotService] get_group_info 返回结果:', JSON.stringify(result, null, 2));
+      return result;
+    } catch (error) {
+      console.error('[RunbotService] get_group_info 失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取群详细信息（调试用）
+   */
+  async debugGetGroupDetailInfo(groupId: number): Promise<any> {
+    console.log('[RunbotService] 调用 get_group_detail_info, groupId:', groupId);
+    try {
+      const result = await invoke('get_group_detail_info', { groupId });
+      console.log('[RunbotService] get_group_detail_info 返回结果:', JSON.stringify(result, null, 2));
+      return result;
+    } catch (error) {
+      console.error('[RunbotService] get_group_detail_info 失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 获取群信息扩展（调试用）
+   */
+  async debugGetGroupInfoEx(groupId: number, noCache: boolean = false): Promise<any> {
+    console.log('[RunbotService] 调用 get_group_info_ex, groupId:', groupId, 'noCache:', noCache);
+    try {
+      const result = await invoke('get_group_info_ex', { groupId, noCache });
+      console.log('[RunbotService] get_group_info_ex 返回结果:', JSON.stringify(result, null, 2));
+      return result;
+    } catch (error) {
+      console.error('[RunbotService] get_group_info_ex 失败:', error);
+      throw error;
+    }
+  }
+
+  // ========== 群聊扩展 API ==========
+
+  /**
+   * 退出群聊
+   * @param groupId 群号
+   * @param isDismiss 是否解散（仅群主可用）
+   */
+  async setGroupLeave(groupId: number, isDismiss: boolean = false): Promise<any> {
+    return await this.sendMessageWithResponse('set_group_leave', {
+      group_id: groupId,
+      is_dismiss: isDismiss,
+    });
+  }
+
+  /**
+   * 设置群消息已读
+   * @param groupId 群号
+   */
+  async setGroupMsgRead(groupId: number): Promise<any> {
+    return await this.sendMessageWithResponse('set_group_msg_read', {
+      group_id: groupId,
+    });
+  }
+
+  /**
+   * 全部消息设为已读
+   */
+  async setAllMsgRead(): Promise<any> {
+    return await this.sendMessageWithResponse('set_all_msg_read', {});
+  }
+
+  /**
+   * 设置群消息免打扰
+   * @param groupId 群号
+   * @param enable 是否开启免打扰
+   */
+  async setGroupMsgNotDisturb(groupId: number, enable: boolean): Promise<any> {
+    // 注意：这个 API 可能需要根据实际 NapCat 实现调整
+    return await this.sendMessageWithResponse('set_group_msg_not_disturb', {
+      group_id: groupId,
+      enable: enable,
+    });
+  }
+
+  /**
+   * 屏蔽此人
+   * @param groupId 群号
+   * @param userId 用户 ID
+   * @param enable 是否屏蔽
+   */
+  async setGroupMemberBlock(groupId: number, userId: number, enable: boolean): Promise<any> {
+    // 注意：这个 API 可能需要根据实际 NapCat 实现调整
+    return await this.sendMessageWithResponse('set_group_member_block', {
+      group_id: groupId,
+      user_id: userId,
+      enable: enable,
+    });
+  }
+
+  /**
+   * 群签到
+   * @param groupId 群号
+   */
+  async groupCheckIn(groupId: number): Promise<any> {
+    return await this.sendMessageWithResponse('group_check_in', {
+      group_id: groupId,
+    });
+  }
+
+  // ========== 好友/私聊扩展 API ==========
+
+  /**
+   * 删除好友
+   * @param userId 用户 ID
+   * @param tempBlock 是否临时拉黑
+   * @param tempBothDel 是否双向删除
+   */
+  async deleteFriend(userId: number, tempBlock: boolean = false, tempBothDel: boolean = false): Promise<any> {
+    return await this.sendMessageWithResponse('delete_friend', {
+      user_id: userId,
+      temp_block: tempBlock,
+      temp_both_del: tempBothDel,
+    });
+  }
+
+  /**
+   * 设置私聊消息已读
+   * @param userId 用户 ID
+   */
+  async setPrivateMsgRead(userId: number): Promise<any> {
+    return await this.sendMessageWithResponse('set_private_msg_read', {
+      user_id: userId,
+    });
+  }
+
+  /**
+   * 举报好友/用户
+   * @param userId 用户 ID
+   */
+  async reportUser(userId: number): Promise<any> {
+    // 注意：这个 API 可能需要根据实际 NapCat 实现调整
+    return await this.sendMessageWithResponse('report_user', {
+      user_id: userId,
+    });
   }
 }
 

@@ -442,6 +442,9 @@ onMounted(async () => {
         message_full: message,
       });
       
+      // 首先调用 runbotService.handleApiResponse 处理 Promise 回调
+      runbotService.handleApiResponse(message);
+      
       // 尝试从不同位置获取响应数据
       let responseData: any = null;
       let action: string | null = null;

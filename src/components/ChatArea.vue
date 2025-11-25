@@ -5,6 +5,7 @@ import { getMessages, saveMessage } from '../services/storage';
 import { parseCQCode, type CQSegment } from '../utils/cqcode';
 import { getFaceDisplayText, getFaceImageUrl } from '../utils/qq-face';
 import { getGroupMemberDisplayName, getGroupMembers } from '../stores/group-members';
+import { getContact } from '../stores/contacts';
 import qface from 'qface';
 import { checkImageCache, downloadImage } from '../services/image';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
@@ -46,7 +47,7 @@ const showFacePicker = ref(false); // 是否显示表情选择器
 const facePickerRef = ref<HTMLElement | null>(null); // 表情选择器引用
 const inputEditorRef = ref<HTMLElement | null>(null); // 富文本编辑器引用
 const showDebugPanel = ref(false); // 是否显示调试面板
-const debugActiveTab = ref<'messages' | 'members'>('messages'); // debug 面板活动标签
+const debugActiveTab = ref<'messages' | 'members' | 'api'>('messages'); // debug 面板活动标签
 const isDev = import.meta.env.DEV; // 是否为开发环境
 
 // @ 功能相关
@@ -64,6 +65,16 @@ const contextMenuMessage = ref<OneBotMessage | null>(null);
 
 // 回复状态
 const replyToMessage = ref<OneBotMessage | null>(null);
+
+// 更多功能抽屉
+const showMoreDrawer = ref(false);
+const moreDrawerLoading = ref(false);
+const groupDetailInfo = ref<any>(null);
+const groupInfoEx = ref<any>(null);
+const friendInfo = ref<any>(null);
+
+// 群成员列表抽屉
+const showMemberListDrawer = ref(false);
 
 // 过滤当前聊天的消息（包括发送的消息）
 const filteredMessages = computed(() => {
@@ -1858,6 +1869,234 @@ const handleMessageRecalled = async (messageId: number) => {
   }
 };
 
+// ========== 更多功能相关 ==========
+
+// 加载群详细信息
+const loadGroupDetails = async () => {
+  if (props.chatType !== 'group' || !props.chatId) return;
+  
+  console.log('[ChatArea] loadGroupDetails 开始加载，群号:', props.chatId);
+  moreDrawerLoading.value = true;
+  groupDetailInfo.value = null;
+  groupInfoEx.value = null;
+  
+  try {
+    // 并行加载两个接口
+    const [detailResult, exResult] = await Promise.all([
+      runbotService.debugGetGroupDetailInfo(props.chatId),
+      runbotService.debugGetGroupInfoEx(props.chatId, false)
+    ]);
+    
+    groupDetailInfo.value = detailResult;
+    groupInfoEx.value = exResult;
+    console.log('[ChatArea] 群详细信息加载成功');
+    console.log('[ChatArea] 新的群名片:', detailResult?.cmdUinGroupCard);
+    console.log('[ChatArea] 新的群备注:', detailResult?.remarkName || detailResult?.group_remark);
+  } catch (error) {
+    console.error('[ChatArea] 加载群详细信息失败:', error);
+  } finally {
+    moreDrawerLoading.value = false;
+  }
+};
+
+// 加载好友信息
+const loadFriendInfo = () => {
+  if (props.chatType !== 'private' || !props.chatId) return;
+  
+  console.log('[ChatArea] loadFriendInfo 从 store 加载，好友ID:', props.chatId);
+  moreDrawerLoading.value = true;
+  friendInfo.value = null;
+  
+  try {
+    // 直接从 contacts store 中获取好友信息
+    const contact = getContact(props.chatId);
+    
+    if (contact) {
+      // 转换为与 API 相同的格式
+      friendInfo.value = {
+        user_id: contact.userId,
+        nickname: contact.nickname,
+        remark: contact.remark || ''
+      };
+      console.log('[ChatArea] 好友信息加载成功:', friendInfo.value);
+    } else {
+      console.warn('[ChatArea] 未找到好友信息，好友ID:', props.chatId);
+      // 即使没找到，也创建一个基本信息对象
+      friendInfo.value = {
+        user_id: props.chatId,
+        nickname: props.chatName || `用户 ${props.chatId}`,
+        remark: ''
+      };
+    }
+  } catch (error) {
+    console.error('[ChatArea] 加载好友信息失败:', error);
+  } finally {
+    moreDrawerLoading.value = false;
+  }
+};
+
+// 打开/关闭更多功能抽屉
+const toggleMoreDrawer = async () => {
+  showMoreDrawer.value = !showMoreDrawer.value;
+  
+  // 如果是打开抽屉，则根据聊天类型加载数据
+  if (showMoreDrawer.value) {
+    if (props.chatType === 'group') {
+      await loadGroupDetails();
+    } else if (props.chatType === 'private') {
+      loadFriendInfo(); // 同步函数，不需要 await
+    }
+  }
+};
+
+// 设置消息已读
+const handleSetMsgRead = async () => {
+  if (!props.chatId) return;
+  
+  try {
+    if (props.chatType === 'group') {
+      await runbotService.setGroupMsgRead(props.chatId);
+      console.log('[ChatArea] 群消息已设为已读');
+    } else if (props.chatType === 'private') {
+      await runbotService.setPrivateMsgRead(props.chatId);
+      console.log('[ChatArea] 私聊消息已设为已读');
+    }
+    showMoreDrawer.value = false;
+  } catch (error) {
+    console.error('[ChatArea] 设置消息已读失败:', error);
+  }
+};
+
+// // 屏蔽此人（仅私聊）
+// const handleBlockUser = async () => {
+//   if (props.chatType !== 'private' || !props.chatId) return;
+  
+//   const confirmed = confirm('确定要屏蔽此人吗？');
+//   if (!confirmed) return;
+  
+//   try {
+//     // 注意：这个功能可能需要特殊的 API，目前使用删除好友 + 拉黑
+//     await runbotService.deleteFriend(props.chatId, true, false);
+//     console.log('[ChatArea] 已屏蔽用户');
+//     showMoreDrawer.value = false;
+//   } catch (error) {
+//     console.error('[ChatArea] 屏蔽用户失败:', error);
+//   }
+// };
+
+// // 删除好友（仅私聊）
+// const handleDeleteFriend = async () => {
+//   if (props.chatType !== 'private' || !props.chatId) return;
+  
+//   const confirmed = confirm('确定要删除此好友吗？');
+//   if (!confirmed) return;
+  
+//   try {
+//     await runbotService.deleteFriend(props.chatId, false, true);
+//     console.log('[ChatArea] 已删除好友');
+//     showMoreDrawer.value = false;
+//   } catch (error) {
+//     console.error('[ChatArea] 删除好友失败:', error);
+//   }
+// };
+
+// // 举报（仅私聊）
+// const handleReportUser = async () => {
+//   if (props.chatType !== 'private' || !props.chatId) return;
+  
+//   const confirmed = confirm('确定要举报此用户吗？');
+//   if (!confirmed) return;
+  
+//   try {
+//     await runbotService.reportUser(props.chatId);
+//     console.log('[ChatArea] 已举报用户');
+//     showMoreDrawer.value = false;
+//   } catch (error) {
+//     console.error('[ChatArea] 举报用户失败:', error);
+//   }
+// };
+
+// // 退出群聊(仅群聊)
+// const handleLeaveGroup = async () => {
+//   if (props.chatType !== 'group' || !props.chatId) return;
+  
+//   const confirmed = confirm('确定要退出此群聊吗？');
+//   if (!confirmed) return;
+  
+//   try {
+//     await runbotService.setGroupLeave(props.chatId, false);
+//     console.log('[ChatArea] 已退出群聊');
+//     showMoreDrawer.value = false;
+//   } catch (error) {
+//     console.error('[ChatArea] 退出群聊失败:', error);
+//   }
+// };
+
+// // 群签到（仅群聊）
+// const handleGroupCheckIn = async () => {
+//   if (props.chatType !== 'group' || !props.chatId) return;
+  
+//   try {
+//     const result = await runbotService.groupCheckIn(props.chatId);
+//     console.log('[ChatArea] 群签到结果:', result);
+//     alert('签到成功！');
+//     showMoreDrawer.value = false;
+//   } catch (error) {
+//     console.error('[ChatArea] 群签到失败:', error);
+//     alert('签到失败，请查看控制台日志');
+//   }
+// };
+
+// ========== 调试功能 ==========
+
+// 调试: get_group_info
+const debugGetGroupInfo = async () => {
+  if (props.chatType !== 'group' || !props.chatId) return;
+  
+  console.log('[ChatArea] ========== 开始调试 get_group_info ==========');
+  try {
+    await runbotService.debugGetGroupInfo(props.chatId, false);
+    console.log('[ChatArea] get_group_info 调用成功');
+    alert('get_group_info 调用成功！请查看控制台');
+  } catch (error) {
+    console.error('[ChatArea] get_group_info 调用失败:', error);
+    alert('get_group_info 调用失败，请查看控制台');
+  }
+  console.log('[ChatArea] ========== get_group_info 调试结束 ==========');
+};
+
+// 调试: get_group_detail_info
+const debugGetGroupDetailInfo = async () => {
+  if (props.chatType !== 'group' || !props.chatId) return;
+  
+  console.log('[ChatArea] ========== 开始调试 get_group_detail_info ==========');
+  try {
+    await runbotService.debugGetGroupDetailInfo(props.chatId);
+    console.log('[ChatArea] get_group_detail_info 调用成功');
+    alert('get_group_detail_info 调用成功！请查看控制台');
+  } catch (error) {
+    console.error('[ChatArea] get_group_detail_info 调用失败:', error);
+    alert('get_group_detail_info 调用失败，请查看控制台');
+  }
+  console.log('[ChatArea] ========== get_group_detail_info 调试结束 ==========');
+};
+
+// 调试: get_group_info_ex
+const debugGetGroupInfoEx = async () => {
+  if (props.chatType !== 'group' || !props.chatId) return;
+  
+  console.log('[ChatArea] ========== 开始调试 get_group_info_ex ==========');
+  try {
+    await runbotService.debugGetGroupInfoEx(props.chatId, false);
+    console.log('[ChatArea] get_group_info_ex 调用成功');
+    alert('get_group_info_ex 调用成功！请查看控制台');
+  } catch (error) {
+    console.error('[ChatArea] get_group_info_ex 调用失败:', error);
+    alert('get_group_info_ex 调用失败，请查看控制台');
+  }
+  console.log('[ChatArea] ========== get_group_info_ex 调试结束 ==========');
+};
+
 // 暴露方法供父组件调用
 defineExpose({
   addMessage,
@@ -1886,21 +2125,36 @@ defineExpose({
         </div>
         <span class="chat-name">{{ chatName || '选择聊天' }}</span>
       </div>
-      <!-- Debug 按钮（仅开发环境显示） -->
-      <button 
-        v-if="isDev" 
-        class="debug-button" 
-        @click="showDebugPanel = !showDebugPanel"
-        :title="showDebugPanel ? '隐藏调试面板' : '显示调试面板'"
-      >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none"/>
-          <line x1="2" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.5"/>
-          <line x1="4.5" y1="8.5" x2="6.5" y2="8.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-          <line x1="4.5" y1="10.5" x2="8.5" y2="10.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
-        </svg>
-        <span>Debug</span>
-      </button>
+      <div class="chat-header-actions">
+        <!-- 更多功能按钮 -->
+        <button 
+          v-if="chatId && chatType"
+          class="more-button" 
+          @click="toggleMoreDrawer"
+          title="更多功能"
+        >
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="12" cy="6" r="2" fill="currentColor"/>
+            <circle cx="12" cy="12" r="2" fill="currentColor"/>
+            <circle cx="12" cy="18" r="2" fill="currentColor"/>
+          </svg>
+        </button>
+        <!-- Debug 按钮（仅开发环境显示） -->
+        <button 
+          v-if="isDev" 
+          class="debug-button" 
+          @click="showDebugPanel = !showDebugPanel"
+          :title="showDebugPanel ? '隐藏调试面板' : '显示调试面板'"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="2" y="3" width="12" height="10" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            <line x1="2" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.5"/>
+            <line x1="4.5" y1="8.5" x2="6.5" y2="8.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+            <line x1="4.5" y1="10.5" x2="8.5" y2="10.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+          </svg>
+          <span>Debug</span>
+        </button>
+      </div>
     </div>
     
     <!-- Debug 面板（仅开发环境显示） -->
@@ -1924,6 +2178,13 @@ defineExpose({
           @click="debugActiveTab = 'members'"
         >
           群成员 ({{ groupMembersList.length }})
+        </button>
+        <button 
+          class="debug-tab"
+          :class="{ active: debugActiveTab === 'api' }"
+          @click="debugActiveTab = 'api'"
+        >
+          API 调试
         </button>
       </div>
       <div class="debug-panel-content">
@@ -1982,6 +2243,53 @@ defineExpose({
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- API 调试 Tab -->
+        <div v-if="debugActiveTab === 'api'" class="debug-tab-content">
+          <div class="debug-info">
+            <p><strong>聊天类型：</strong>{{ chatType === 'group' ? '群聊' : chatType === 'private' ? '私聊' : '未选择' }}</p>
+            <p v-if="chatId"><strong>聊天 ID：</strong>{{ chatId }}</p>
+          </div>
+          
+          <!-- 群聊 API -->
+          <div v-if="chatType === 'group' && chatId" class="debug-api-section">
+            <h4>群聊 API 测试</h4>
+            <div class="debug-api-buttons">
+              <button class="debug-api-button" @click="debugGetGroupInfo">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M20 8h-2.81c-.45-.78-1.07-1.45-1.82-1.96L17 4.41 15.59 3l-2.17 2.17C12.96 5.06 12.49 5 12 5c-.49 0-.96.06-1.41.17L8.41 3 7 4.41l1.62 1.63C7.88 6.55 7.26 7.22 6.81 8H4v2h2.09c-.05.33-.09.66-.09 1v1H4v2h2v1c0 .34.04.67.09 1H4v2h2.81c1.04 1.79 2.97 3 5.19 3s4.15-1.21 5.19-3H20v-2h-2.09c.05-.33.09-.66.09-1v-1h2v-2h-2v-1c0-.34-.04-.67-.09-1H20V8zm-6 8h-4v-2h4v2zm0-4h-4v-2h4v2z" fill="currentColor"/>
+                </svg>
+                <span>get_group_info</span>
+              </button>
+              <button class="debug-api-button" @click="debugGetGroupDetailInfo">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M20 8h-2.81c-.45-.78-1.07-1.45-1.82-1.96L17 4.41 15.59 3l-2.17 2.17C12.96 5.06 12.49 5 12 5c-.49 0-.96.06-1.41.17L8.41 3 7 4.41l1.62 1.63C7.88 6.55 7.26 7.22 6.81 8H4v2h2.09c-.05.33-.09.66-.09 1v1H4v2h2v1c0 .34.04.67.09 1H4v2h2.81c1.04 1.79 2.97 3 5.19 3s4.15-1.21 5.19-3H20v-2h-2.09c.05-.33.09-.66.09-1v-1h2v-2h-2v-1c0-.34-.04-.67-.09-1H20V8zm-6 8h-4v-2h4v2zm0-4h-4v-2h4v2z" fill="currentColor"/>
+                </svg>
+                <span>get_group_detail_info</span>
+              </button>
+              <button class="debug-api-button" @click="debugGetGroupInfoEx">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M20 8h-2.81c-.45-.78-1.07-1.45-1.82-1.96L17 4.41 15.59 3l-2.17 2.17C12.96 5.06 12.49 5 12 5c-.49 0-.96.06-1.41.17L8.41 3 7 4.41l1.62 1.63C7.88 6.55 7.26 7.22 6.81 8H4v2h2.09c-.05.33-.09.66-.09 1v1H4v2h2v1c0 .34.04.67.09 1H4v2h2.81c1.04 1.79 2.97 3 5.19 3s4.15-1.21 5.19-3H20v-2h-2.09c.05-.33.09-.66.09-1v-1h2v-2h-2v-1c0-.34-.04-.67-.09-1H20V8zm-6 8h-4v-2h4v2zm0-4h-4v-2h4v2z" fill="currentColor"/>
+                </svg>
+                <span>get_group_info_ex</span>
+              </button>
+            </div>
+            <div class="debug-api-hint">
+              点击按钮调用 API，结果会输出到浏览器控制台
+            </div>
+          </div>
+
+          <!-- 私聊提示 -->
+          <div v-else-if="chatType === 'private'" class="debug-api-section">
+            <h4>私聊 API 测试</h4>
+            <p class="debug-api-empty">私聊暂无可调试的 API</p>
+          </div>
+
+          <!-- 未选择聊天 -->
+          <div v-else class="debug-api-section">
+            <p class="debug-api-empty">请先选择一个聊天</p>
           </div>
         </div>
       </div>
@@ -2286,6 +2594,225 @@ defineExpose({
       class="context-menu-overlay"
       @click="closeContextMenu"
     ></div>
+
+    <!-- 更多功能抽屉 -->
+    <div
+      v-if="showMoreDrawer"
+      class="more-drawer-overlay"
+      @click="showMoreDrawer = false"
+    ></div>
+    <div
+      v-if="showMoreDrawer"
+      class="more-drawer"
+      :class="{ 'more-drawer-open': showMoreDrawer }"
+    >
+      <div class="more-drawer-content" @click.stop>
+        <!-- Loading 状态 -->
+        <div v-if="moreDrawerLoading && chatType === 'group'" class="more-drawer-loading">
+          <div class="loading-spinner"></div>
+          <p>加载中...</p>
+        </div>
+
+        <!-- 群聊详情 -->
+        <template v-else-if="chatType === 'group' && groupDetailInfo">
+          <!-- 群资料卡 -->
+          <div class="group-info-card">
+            <div class="group-avatar">
+              <img 
+                v-if="chatId && !chatAvatarFailed" 
+                :src="`asset://avatar/group/${chatId}.png`" 
+                :alt="chatName"
+                @error="chatAvatarFailed = true"
+              />
+              <div v-else class="avatar-placeholder-large">
+                {{ chatName ? chatName.charAt(0) : '?' }}
+              </div>
+            </div>
+            <div class="group-basic-info">
+              <h2 class="group-name">{{ groupDetailInfo.group_name || chatName }}</h2>
+              <p class="group-meta">
+                {{ groupDetailInfo.group_id || chatId }} 
+                ({{ groupDetailInfo.member_count || 0 }} / {{ groupDetailInfo.max_member_count || 0 }})
+              </p>
+            </div>
+          </div>
+
+          <!-- 群成员卡片 -->
+          <div class="info-card">
+            <div class="info-card-header">
+              <h3>群成员</h3>
+              <button class="more-button-text" @click="showMemberListDrawer = true">
+                查看全部 →
+              </button>
+            </div>
+            <div class="member-grid">
+              <div 
+                v-for="member in groupMembersList.slice(0, 9)" 
+                :key="member.userId"
+                class="member-avatar-item"
+                :title="member.card || member.nickname"
+              >
+                <img 
+                  :src="`asset://avatar/user/${member.userId}.png`" 
+                  :alt="member.card || member.nickname"
+                  @error="(e: Event) => { (e.target as HTMLImageElement).src = ''; }"
+                />
+                <span class="member-avatar-name">{{ (member.card || member.nickname || '').substring(0, 4) }}</span>
+              </div>
+              <div v-if="groupMembersList.length > 9" class="member-avatar-item member-more">
+                <span>+{{ groupMembersList.length - 9 }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 群公告卡片 -->
+          <div class="info-card">
+            <div class="info-card-header">
+              <h3>群公告</h3>
+            </div>
+            <div class="info-card-content">
+              <p v-if="groupDetailInfo.groupMemo" class="group-notice">{{ groupDetailInfo.groupMemo }}</p>
+              <p v-else class="empty-text">暂无群公告</p>
+            </div>
+          </div>
+
+          <!-- 快捷操作 -->
+          <div class="quick-actions">
+            <button class="action-button" @click="handleSetMsgRead">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z" fill="currentColor"/>
+              </svg>
+              <span>设为已读</span>
+            </button>
+            <!-- <button class="action-button" @click="handleGroupCheckIn">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" fill="currentColor"/>
+              </svg>
+              <span>群签到</span>
+            </button> -->
+          </div>
+
+          <!-- 退出群聊 -->
+          <!-- <div class="danger-zone">
+            <button class="danger-button" @click="handleLeaveGroup">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z" fill="currentColor"/>
+              </svg>
+              <span>退出群聊</span>
+            </button>
+          </div> -->
+        </template>
+
+        <!-- 私聊详情 -->
+        <template v-else-if="chatType === 'private'">
+          <!-- Loading 状态 -->
+          <div v-if="moreDrawerLoading" class="more-drawer-loading">
+            <div class="loading-spinner"></div>
+            <p>加载中...</p>
+          </div>
+
+          <!-- 好友名片 -->
+          <template v-else-if="friendInfo">
+            <!-- 好友资料卡 -->
+            <div class="group-info-card">
+              <div class="group-avatar">
+                <img 
+                  v-if="chatId && !chatAvatarFailed" 
+                  :src="`asset://avatar/user/${chatId}.png`" 
+                  :alt="chatName"
+                  @error="chatAvatarFailed = true"
+                />
+                <div v-else class="avatar-placeholder-large">
+                  {{ chatName ? chatName.charAt(0) : '?' }}
+                </div>
+              </div>
+              <div class="group-basic-info">
+                <h2 class="group-name">{{ friendInfo.nickname || chatName }}</h2>
+                <p class="group-meta">{{ friendInfo.user_id || chatId }}</p>
+                <p v-if="friendInfo.remark" class="friend-remark">备注: {{ friendInfo.remark }}</p>
+              </div>
+            </div>
+
+            <!-- 快捷操作 -->
+            <div class="quick-actions">
+              <button class="action-button" @click="handleSetMsgRead">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z" fill="currentColor"/>
+                </svg>
+                <span>设为已读</span>
+              </button>
+            </div>
+
+            <!-- 危险操作 -->
+            <!-- <div class="danger-zone">
+              <button class="danger-button" @click="handleBlockUser">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM4 12c0-4.42 3.58-8 8-8 1.85 0 3.55.63 4.9 1.69L5.69 16.9C4.63 15.55 4 13.85 4 12zm8 8c-1.85 0-3.55-.63-4.9-1.69L18.31 7.1C19.37 8.45 20 10.15 20 12c0 4.42-3.58 8-8 8z" fill="currentColor"/>
+                </svg>
+                <span>屏蔽此人</span>
+              </button>
+              <button class="danger-button" @click="handleDeleteFriend">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M14.12 10.47L12 12.59l-2.13-2.12-1.41 1.41L10.59 14l-2.12 2.12 1.41 1.41L12 15.41l2.12 2.12 1.41-1.41L13.41 14l2.12-2.12zM15.5 4l-1-1h-5l-1 1H5v2h14V4zM6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM8 9h8v10H8V9z" fill="currentColor"/>
+                </svg>
+                <span>删除好友</span>
+              </button>
+              <button class="danger-button" @click="handleReportUser">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z" fill="currentColor"/>
+                </svg>
+                <span>举报</span>
+              </button>
+            </div> -->
+          </template>
+        </template>
+      </div>
+    </div>
+
+    <!-- 群成员列表抽屉 -->
+    <div
+      v-if="showMemberListDrawer"
+      class="member-list-overlay"
+      @click="showMemberListDrawer = false"
+    ></div>
+    <div
+      v-if="showMemberListDrawer"
+      class="member-list-drawer"
+      :class="{ 'member-list-drawer-open': showMemberListDrawer }"
+    >
+      <div class="member-list-header">
+        <h2>群成员列表</h2>
+        <button class="close-button" @click="showMemberListDrawer = false">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z" fill="currentColor"/>
+          </svg>
+        </button>
+      </div>
+      <div class="member-list-content">
+        <div class="member-list-stats">
+          <span>共 {{ groupMembersList.length }} 名成员</span>
+        </div>
+        <div class="member-list-grid">
+          <div 
+            v-for="member in groupMembersList" 
+            :key="member.userId"
+            class="member-list-item"
+          >
+            <div class="member-list-avatar">
+              <img 
+                :src="`asset://avatar/user/${member.userId}.png`" 
+                :alt="member.card || member.nickname"
+                @error="(e: Event) => { (e.target as HTMLImageElement).src = ''; }"
+              />
+            </div>
+            <div class="member-list-info">
+              <div class="member-list-name">{{ member.card || member.nickname || '未知' }}</div>
+              <div class="member-list-id">{{ member.userId }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -2540,6 +3067,77 @@ defineExpose({
 
 .debug-member-info span {
   line-height: 1.5;
+}
+
+/* API 调试样式 */
+.debug-api-section {
+  margin-top: 16px;
+}
+
+.debug-api-section h4 {
+  margin: 0 0 16px 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #222;
+}
+
+.debug-api-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.debug-api-button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: #fff8f0;
+  border: 1px dashed #ff9500;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-size: 14px;
+  font-family: monospace;
+  color: #ff9500;
+  font-weight: 500;
+}
+
+.debug-api-button:hover {
+  background: #ffedd5;
+  border-color: #ff7b00;
+  transform: translateX(4px);
+}
+
+.debug-api-button:active {
+  transform: translateX(4px) scale(0.98);
+}
+
+.debug-api-button svg {
+  flex-shrink: 0;
+  color: #ff9500;
+}
+
+.debug-api-button span {
+  flex: 1;
+}
+
+.debug-api-hint {
+  margin-top: 12px;
+  padding: 12px;
+  background: #f0f9ff;
+  border: 1px solid #b3e5fc;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #0277bd;
+  text-align: center;
+}
+
+.debug-api-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: #8e8e93;
+  font-size: 14px;
 }
 
 .debug-message-list {
@@ -3371,5 +3969,615 @@ defineExpose({
   background: white;
   border-top: 1px solid #e8e8e8;
 }
+
+/* 更多功能抽屉样式 */
+.more-drawer-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.06); /* 0x0F / 255 ≈ 0.06 */
+  z-index: 999;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.more-drawer {
+  position: fixed;
+  top: 0;
+  right: -350px;
+  width: 350px;
+  height: 100vh;
+  background: white;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  transition: right 0.3s ease-out;
+}
+
+.more-drawer-open {
+  right: 0;
+}
+
+.more-drawer {
+  position: fixed;
+  top: 0;
+  right: -350px;
+  width: 350px;
+  height: 100vh;
+  background: #f5f5f5;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  transition: right 0.3s ease-out;
+}
+
+.more-drawer-open {
+  right: 0;
+}
+
+.more-drawer-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  background: #f5f5f5;
+}
+
+/* 加载状态 */
+.more-drawer-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  gap: 16px;
+  background: white;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid #e8e8e8;
+  border-top-color: #07c160;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.more-drawer-loading p {
+  color: #8e8e93;
+  font-size: 14px;
+  margin: 0;
+}
+
+/* 群资料卡 */
+.group-info-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: white;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.group-avatar {
+  flex-shrink: 0;
+}
+
+.group-avatar img {
+  width: 42px;
+  height: 42px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.avatar-placeholder-large {
+  width: 42px;
+  height: 42px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #4a9eff 0%, #357ae8 100%);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.group-basic-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.group-name {
+  margin: 0 0 4px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #000;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-meta {
+  margin: 0;
+  font-size: 12px;
+  color: #888;
+  line-height: 1.4;
+}
+
+.friend-remark {
+  margin: 8px 0 0 0;
+  font-size: 13px;
+  color: #666;
+  line-height: 1.5;
+  padding: 6px 10px;
+  background: #f8f8f8;
+  border-radius: 4px;
+  border-left: 3px solid #1890ff;
+}
+
+/* 信息卡片通用样式 */
+.info-card {
+  background: white;
+  border-radius: 8px;
+  padding: 0;
+  margin-bottom: 8px;
+  transition: all 0.2s;
+}
+
+.info-card.clickable {
+  cursor: pointer;
+}
+
+.info-card.clickable:active {
+  background: #f5f5f5;
+}
+
+.info-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 0.5px solid #e5e5e5;
+}
+
+.info-card-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 400;
+  color: #888;
+}
+
+.info-card-header svg {
+  color: #c0c0c0;
+  flex-shrink: 0;
+}
+
+.more-button-text {
+  background: none;
+  border: none;
+  color: #576b95;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0;
+  transition: opacity 0.2s;
+}
+
+.more-button-text:hover {
+  opacity: 0.7;
+}
+
+.info-card-content {
+  padding: 16px;
+  font-size: 15px;
+  color: #000;
+  line-height: 1.6;
+}
+
+.empty-text {
+  margin: 0;
+  color: #b0b0b0;
+}
+
+.group-notice {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #000;
+}
+
+.group-card, .group-remark {
+  margin: 0;
+  color: #000;
+  font-weight: 400;
+}
+
+/* 成员网格 */
+.member-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  padding: 16px;
+}
+
+.member-avatar-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.member-avatar-item:active {
+  opacity: 0.6;
+}
+
+.member-avatar-item img {
+  width: 48px;
+  height: 48px;
+  border-radius: 4px;
+  object-fit: cover;
+  background: #f5f5f5;
+}
+
+.member-avatar-name {
+  font-size: 12px;
+  color: #000;
+  text-align: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.member-more {
+  background: #f5f5f5;
+  width: 48px;
+  height: 48px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 400;
+  color: #888;
+  cursor: pointer;
+}
+
+.member-more:active {
+  background: #e5e5e5;
+}
+
+/* 快捷操作 */
+.quick-actions {
+  display: flex;
+  gap: 0;
+  background: white;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+
+.action-button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 14px 16px;
+  background: white;
+  border: none;
+  border-right: 0.5px solid #e5e5e5;
+  cursor: pointer;
+  transition: background 0.2s;
+  font-size: 14px;
+  font-weight: 400;
+  color: #000;
+}
+
+.action-button:last-child {
+  border-right: none;
+}
+
+.action-button:active {
+  background: #f5f5f5;
+}
+
+.action-button svg {
+  color: #07c160;
+  flex-shrink: 0;
+}
+
+/* 危险区域 */
+.danger-zone {
+  margin-top: 0;
+  background: white;
+  border-radius: 8px;
+}
+
+.danger-button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 16px;
+  background: white;
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s;
+  font-size: 15px;
+  font-weight: 400;
+  color: #fa5151;
+}
+
+.danger-button:active {
+  background: #f5f5f5;
+}
+
+.danger-button svg {
+  flex-shrink: 0;
+}
+
+.more-drawer-section {
+  margin-bottom: 24px;
+}
+
+.more-drawer-section:last-child {
+  margin-bottom: 0;
+}
+
+.more-drawer-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #8e8e93;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 12px;
+  padding-left: 4px;
+}
+
+.more-drawer-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-bottom: 6px;
+  user-select: none;
+}
+
+.more-drawer-item:hover {
+  background: #f4f4f5;
+}
+
+.more-drawer-item:active {
+  transform: scale(0.98);
+}
+
+.more-drawer-item svg {
+  color: #007aff;
+  flex-shrink: 0;
+}
+
+.more-drawer-item span {
+  font-size: 15px;
+  color: #222;
+  font-weight: 500;
+}
+
+.more-drawer-item-danger {
+  color: #ff3b30;
+}
+
+.more-drawer-item-danger svg {
+  color: #ff3b30;
+}
+
+.more-drawer-item-danger span {
+  color: #ff3b30;
+}
+
+.more-drawer-item-danger:hover {
+  background: #ffefee;
+}
+
+/* 头部操作按钮区域 */
+.chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.more-button {
+  padding: 8px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: #666;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.more-button:hover {
+  background: #f0f0f0;
+  color: #007aff;
+}
+
+.more-button:active {
+  transform: scale(0.95);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* 群成员列表抽屉 */
+.member-list-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.01); /* 0x03 / 255 ≈ 0.01 */
+  z-index: 1001;
+  animation: fadeIn 0.3s;
+}
+
+.member-list-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 400px;
+  height: 100%;
+  background: white;
+  z-index: 1002;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.15);
+  transform: translateX(100%);
+  transition: transform 0.3s ease;
+}
+
+.member-list-drawer-open {
+  transform: translateX(0);
+}
+
+.member-list-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #e8e8e8;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: white;
+}
+
+.member-list-header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: #222;
+}
+
+.close-button {
+  padding: 4px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  border-radius: 4px;
+  color: #666;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.close-button:hover {
+  background: #f0f0f0;
+  color: #222;
+}
+
+.close-button:active {
+  background: #e0e0e0;
+}
+
+.member-list-content {
+  flex: 1;
+  overflow-y: auto;
+  background: #f5f5f5;
+}
+
+.member-list-stats {
+  padding: 12px 20px;
+  background: white;
+  border-bottom: 1px solid #e8e8e8;
+  font-size: 14px;
+  color: #666;
+}
+
+.member-list-grid {
+  padding: 8px;
+}
+
+.member-list-item {
+  display: flex;
+  align-items: center;
+  padding: 12px;
+  background: white;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.member-list-item:hover {
+  background: #f8f8f8;
+  transform: translateX(-2px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.member-list-item:active {
+  transform: translateX(-1px) scale(0.98);
+}
+
+.member-list-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: #e8e8e8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.member-list-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.member-list-info {
+  flex: 1;
+  margin-left: 12px;
+  min-width: 0;
+}
+
+.member-list-name {
+  font-size: 15px;
+  font-weight: 500;
+  color: #222;
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.member-list-id {
+  font-size: 13px;
+  color: #888;
+}
 </style>
+
 

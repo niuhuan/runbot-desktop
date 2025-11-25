@@ -263,6 +263,8 @@ pub fn run() {
             runbot::get_runbot_self_id,
             runbot::send_runbot_message,
             runbot::get_forward_message,
+            runbot::get_group_detail_info,
+            runbot::get_group_info_ex,
             // 存储命令
             storage::save_config,
             storage::load_config,

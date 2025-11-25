@@ -1039,3 +1039,75 @@ pub async fn get_forward_message(
         Err("未连接到 Runbot 服务器".to_string())
     }
 }
+
+/// 获取群详细信息
+#[tauri::command]
+pub async fn get_group_detail_info(
+    group_id: i64,
+    state: State<'_, Arc<Mutex<RunbotState>>>,
+) -> Result<serde_json::Value, String> {
+    let bot_ctx = {
+        let state_guard = state.lock().map_err(|e| format!("锁定状态失败: {}", e))?;
+        
+        if !state_guard.connected {
+            return Err("未连接到 Runbot 服务器".to_string());
+        }
+
+        state_guard.bot_ctx.clone()
+    };
+
+    if let Some(bot_ctx) = bot_ctx {
+        let response = bot_ctx
+            .websocket_send("get_group_detail_info", serde_json::json!({
+                "group_id": group_id,
+            }))
+            .await
+            .map_err(|e| format!("发送获取群详细信息请求失败: {}", e))?;
+        
+        let data = response
+            .data(tokio::time::Duration::from_secs(10))
+            .await
+            .map_err(|e| format!("获取群详细信息响应失败: {}", e))?;
+        
+        Ok(data)
+    } else {
+        Err("未连接到 Runbot 服务器".to_string())
+    }
+}
+
+/// 获取群扩展信息
+#[tauri::command]
+pub async fn get_group_info_ex(
+    group_id: i64,
+    no_cache: bool,
+    state: State<'_, Arc<Mutex<RunbotState>>>,
+) -> Result<serde_json::Value, String> {
+    let bot_ctx = {
+        let state_guard = state.lock().map_err(|e| format!("锁定状态失败: {}", e))?;
+        
+        if !state_guard.connected {
+            return Err("未连接到 Runbot 服务器".to_string());
+        }
+
+        state_guard.bot_ctx.clone()
+    };
+
+    if let Some(bot_ctx) = bot_ctx {
+        let response = bot_ctx
+            .websocket_send("get_group_info_ex", serde_json::json!({
+                "group_id": group_id,
+                "no_cache": no_cache,
+            }))
+            .await
+            .map_err(|e| format!("发送获取群扩展信息请求失败: {}", e))?;
+        
+        let data = response
+            .data(tokio::time::Duration::from_secs(10))
+            .await
+            .map_err(|e| format!("获取群扩展信息响应失败: {}", e))?;
+        
+        Ok(data)
+    } else {
+        Err("未连接到 Runbot 服务器".to_string())
+    }
+}
