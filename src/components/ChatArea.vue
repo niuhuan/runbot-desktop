@@ -10,6 +10,7 @@ import { checkImageCache, downloadImage } from '../services/image';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow, currentMonitor } from '@tauri-apps/api/window';
 import { listen } from '@tauri-apps/api/event';
+import PinyinMatch from 'pinyin-match';
 import { 
   getChatInputState, 
   updateChatInputState, 
@@ -618,11 +619,27 @@ const filteredMemberList = computed(() => {
     return members.slice(0, 10);
   }
   
-  // 根据搜索词过滤
+  // 根据搜索词过滤（支持拼音匹配）
   return members.filter(member => {
-    const displayName = (member.card || member.nickname || '').toLowerCase();
+    const displayName = member.card || member.nickname || '';
     const userId = String(member.userId);
-    return displayName.includes(searchLower) || userId.includes(searchLower);
+    
+    // 1. 检查用户ID是否匹配
+    if (userId.includes(searchLower)) {
+      return true;
+    }
+    
+    // 2. 检查名称是否直接包含搜索词（不区分大小写）
+    if (displayName.toLowerCase().includes(searchLower)) {
+      return true;
+    }
+    
+    // 3. 检查拼音是否匹配（支持全拼和首字母）
+    if (PinyinMatch.match(displayName, searchLower)) {
+      return true;
+    }
+    
+    return false;
   }).slice(0, 10);
 });
 

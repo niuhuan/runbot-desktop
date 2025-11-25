@@ -15,6 +15,7 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-notification": "^2.3.3",
     "@tauri-apps/plugin-opener": "^2",
+    "pinyin-match": "^1.2.9",
     "qface": "^1.4.1",
     "vue": "^3.5.13"
   },

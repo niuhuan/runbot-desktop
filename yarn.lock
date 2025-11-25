@@ -626,6 +626,11 @@ picomatch@^4.0.2, picomatch@^4.0.3:
   resolved "https://registry.npmmirror.com/picomatch/-/picomatch-4.0.3.tgz"
   integrity sha512-5gTmgEY/sqK6gFXLIsQNH19lWb4ebPDLA4SdLP7dsWkIXHWlG66oPuVvXSGFPppYZz8ZDZq0dYYrbHfBCVUb1Q==
 
+pinyin-match@^1.2.9:
+  version "1.2.9"
+  resolved "https://registry.npmmirror.com/pinyin-match/-/pinyin-match-1.2.9.tgz#82ed1330779c4f086c378f6f5477c1527487e4f5"
+  integrity sha512-huJNND+i/eaKnfX4rKirvL/NieZHZlzJ499EXAjSh/OaG9Kw4ucbddDsUl7Cu/mt153nyepmvW0tg/6zrt30HA==
+
 postcss@^8.5.3, postcss@^8.5.6:
   version "8.5.6"
   resolved "https://registry.npmmirror.com/postcss/-/postcss-8.5.6.tgz"
