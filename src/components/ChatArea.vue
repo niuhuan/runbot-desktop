@@ -915,7 +915,7 @@ const openImageViewer = async (imageUrl: string) => {
     const newWidth = Math.min(Math.max(size.width * 1.5, 800), screenWidth * 0.9);
     const newHeight = Math.min(Math.max(size.height * 1.5, 600), screenHeight * 0.9);
     
-    // 构建 URL（开发环境使用 localhost，生产环境使用相对路径）
+    // 构建 URL（开发环境和生产环境路径相同）
     const isDev = import.meta.env.DEV;
     const baseUrl = isDev ? 'http://localhost:1420' : '';
     const viewerUrl = `${baseUrl}/src/pages/image-viewer.html?url=${encodeURIComponent(imageUrl)}`;
@@ -1813,7 +1813,7 @@ const openForwardMessage = async (forwardId: string) => {
       }
     }
     
-    // 构建 URL（开发环境使用 localhost，生产环境使用相对路径）
+    // 构建 URL（开发环境和生产环境路径相同）
     const isDev = import.meta.env.DEV;
     const baseUrl = isDev ? 'http://localhost:1420' : '';
     const viewerUrl = `${baseUrl}/src/pages/forward-viewer.html?id=${forwardId}`;

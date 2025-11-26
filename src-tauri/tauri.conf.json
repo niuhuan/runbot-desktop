@@ -18,7 +18,7 @@
       }
     ],
     "security": {
-        "csp": "default-src 'self'; img-src 'self' asset: https://asset.localhost data: http://q.qlogo.cn http://p.qlogo.cn https:;"
+        "csp": "default-src 'self'; connect-src 'self' ipc://localhost; img-src 'self' asset: https://asset.localhost data: http://q.qlogo.cn http://p.qlogo.cn https:;"
     }
   },
   "bundle": {

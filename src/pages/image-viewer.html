@@ -479,6 +479,18 @@
       }
     });
 
+    // 图片加载失败时也显示窗口
+    image.addEventListener('error', async (e) => {
+      console.error('图片加载失败:', imageUrl, e);
+      try {
+        const window = getCurrentWindow();
+        await window.show();
+        await window.setFocus();
+      } catch (err) {
+        console.error('显示窗口失败:', err);
+      }
+    });
+
     // ESC 键关闭
     document.addEventListener('keydown', async (e) => {
       if (e.key === 'Escape') {
@@ -486,6 +498,21 @@
         await window.close();
       }
     });
+
+    // 超时保护：如果 3 秒后窗口还没显示，强制显示
+    setTimeout(async () => {
+      try {
+        const window = getCurrentWindow();
+        const isVisible = await window.isVisible();
+        if (!isVisible) {
+          console.warn('窗口超时未显示，强制显示');
+          await window.show();
+          await window.setFocus();
+        }
+      } catch (e) {
+        console.error('超时显示窗口失败:', e);
+      }
+    }, 3000);
   </script>
 </body>
 </html>
