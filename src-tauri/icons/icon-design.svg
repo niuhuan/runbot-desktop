@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- 齿轮形状 -->
+    <path id="gear" d="
+      M0,-50 L8,-48 L12,-42 L20,-40 L26,-46 L34,-38 L30,-30 L36,-24 L44,-28 L50,-18 L42,-14 L44,-6 L52,-2 L52,2
+      L44,6 L42,14 L50,18 L44,28 L36,24 L30,30 L34,38 L26,46 L20,40 L12,42 L8,48 L0,50
+      L-8,48 L-12,42 L-20,40 L-26,46 L-34,38 L-30,30 L-36,24 L-44,28 L-50,18 L-42,14 L-44,6 L-52,2 L-52,-2
+      L-44,-6 L-42,-14 L-50,-18 L-44,-28 L-36,-24 L-30,-30 L-34,-38 L-26,-46 L-20,-40 L-12,-42 L-8,-48 Z
+    "/>
+  </defs>
+  
+  <!-- 背景 - macOS 规范：824x824 内容区 -->
+  <rect x="100" y="100" width="824" height="824" rx="185" ry="185" fill="#1976D2"/>
+  
+  <!-- ==================== Tux 企鹅 (占85%高度 ≈ 700px) ==================== -->
+  <g transform="translate(512, 524)">
+    
+    <!-- 身体 -->
+    <ellipse cx="0" cy="50" rx="200" ry="245" fill="#212121"/>
+    
+    <!-- 白色肚子 -->
+    <ellipse cx="0" cy="80" rx="145" ry="195" fill="#FAFAFA"/>
+    
+    <!-- ====== 肚子上的齿轮 ====== -->
+    <g transform="translate(0, 95) scale(2.6)">
+      <use href="#gear" fill="#BDBDBD"/>
+    </g>
+    <circle cx="0" cy="95" r="58" fill="#1976D2"/>
+    <circle cx="0" cy="95" r="34" fill="#BDBDBD"/>
+    <circle cx="0" cy="95" r="14" fill="#1976D2"/>
+    
+    <!-- 头部 -->
+    <ellipse cx="0" cy="-175" rx="160" ry="135" fill="#212121"/>
+    
+    <!-- 白色脸部 (Tux 风格两侧白) -->
+    <ellipse cx="-62" cy="-165" rx="62" ry="70" fill="#FAFAFA"/>
+    <ellipse cx="62" cy="-165" rx="62" ry="70" fill="#FAFAFA"/>
+    
+    <!-- 左眼 -->
+    <ellipse cx="-55" cy="-180" rx="26" ry="32" fill="#FFFFFF"/>
+    <circle cx="-50" cy="-175" r="16" fill="#212121"/>
+    <circle cx="-46" cy="-180" r="6" fill="#FFFFFF"/>
+    
+    <!-- 右眼 -->
+    <ellipse cx="55" cy="-180" rx="26" ry="32" fill="#FFFFFF"/>
+    <circle cx="60" cy="-175" r="16" fill="#212121"/>
+    <circle cx="64" cy="-180" r="6" fill="#FFFFFF"/>
+    
+    <!-- 嘴巴/喙 (Tux 黄色) -->
+    <path d="M0,-132 L-30,-108 Q0,-85 30,-108 Z" fill="#F9A825"/>
+    
+    <!-- 左翅膀 -->
+    <path d="M-200,-10 Q-240,70 -210,175 Q-170,170 -165,70 Q-165,0 -200,-10" fill="#212121"/>
+    
+    <!-- 右翅膀 -->
+    <path d="M200,-10 Q240,70 210,175 Q170,170 165,70 Q165,0 200,-10" fill="#212121"/>
+    
+    <!-- 脚 (Tux 黄色) -->
+    <ellipse cx="-70" cy="295" rx="62" ry="24" fill="#F9A825"/>
+    <ellipse cx="70" cy="295" rx="62" ry="24" fill="#F9A825"/>
+  </g>
+</svg>
